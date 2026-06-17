@@ -2362,19 +2362,21 @@ function drawCarIso(c, x, y, a, def) {
     return { b, t: tp };
   };
   c.fillStyle = 'rgba(0,0,0,0.32)'; poly([P(hl, -hw, 0), P(hl, hw, 0), P(-hl, hw, 0), P(-hl, -hw, 0)]); c.fill();  // shadow
-  // wheels first — the chassis fenders tuck over their tops
-  c.fillStyle = '#0b0b0e';
-  for (const [u, v] of [[hl - 3, -hw], [hl - 3, hw], [-hl + 3, -hw], [-hl + 3, hw]]) { const w = P(u, v, 1.4); c.beginPath(); c.ellipse(w.x, w.y, 2.7, 2.2, 0, 0, 7); c.fill(); }
-  const ch = box(-hl, hl, -hw, hw, 2.2, 4.6, def.col, shade(def.col, -34));            // low chassis slab
+  const ch = box(-hl, hl, -hw, hw, 2, 4.4, def.col, shade(def.col, -34));              // low chassis slab
   c.fillStyle = shade(def.col, 16); poly([ch.t[0], ch.t[1], lp(ch.t[1], ch.t[2], 0.5), lp(ch.t[0], ch.t[3], 0.5)]); c.fill(); // hood sheen
-  const cab = box(-hl * 0.55, hl * 0.3, -hw * 0.72, hw * 0.72, 4.6, 7.8, shade(def.col, -2), shade(def.col, -40)); // raised cabin
+  // wheels — after the chassis (so they show below the fenders), just above the ground
+  for (const [u, v] of [[hl - 3, -hw], [hl - 3, hw], [-hl + 3, -hw], [-hl + 3, hw]]) {
+    const w = P(u, v, 0.9); c.fillStyle = '#0c0c10'; c.beginPath(); c.ellipse(w.x, w.y, 2.6, 2.1, 0, 0, 7); c.fill();
+    c.fillStyle = '#2a2a32'; c.beginPath(); c.ellipse(w.x, w.y - 0.5, 1.4, 1, 0, 0, 7); c.fill();
+  }
+  const cab = box(-hl * 0.55, hl * 0.3, -hw * 0.72, hw * 0.72, 4.4, 7.6, shade(def.col, -2), shade(def.col, -40)); // raised cabin
   c.fillStyle = '#12303a'; poly([cab.b[0], cab.b[1], cab.t[1], cab.t[0]]); c.fill();    // windshield
   c.fillStyle = '#0c2230'; poly([cab.b[2], cab.b[3], cab.t[3], cab.t[2]]); c.fill();    // rear glass
-  c.fillStyle = '#0e2836'; poly([cab.b[1], cab.b[2], cab.t[2], cab.t[1]]); c.fill();    // right windows
-  poly([cab.b[3], cab.b[0], cab.t[0], cab.t[3]]); c.fill();                             // left windows
+  c.fillStyle = '#0e2836'; poly([cab.b[1], cab.b[2], cab.t[2], cab.t[1]]); c.fill(); poly([cab.b[3], cab.b[0], cab.t[0], cab.t[3]]); c.fill(); // side windows
   c.strokeStyle = def.col2; c.lineWidth = 1.2; c.beginPath(); c.moveTo(lp(ch.t[0], ch.t[1], 0.5).x, lp(ch.t[0], ch.t[1], 0.5).y); c.lineTo(lp(ch.t[3], ch.t[2], 0.5).x, lp(ch.t[3], ch.t[2], 0.5).y); c.stroke(); c.lineWidth = 1; // stripe
-  c.fillStyle = '#ffe9a0'; for (const pp of [ch.t[0], ch.t[1]]) c.fillRect(pp.x - 1, pp.y - 1, 2, 2);  // headlights
-  c.fillStyle = '#ff3344'; for (const pp of [ch.t[2], ch.t[3]]) c.fillRect(pp.x - 1, pp.y - 1, 2, 2);  // taillights
+  // lights on the front/rear bumper faces (not floating on the roof)
+  c.fillStyle = '#ffe9a0'; for (const v of [-hw + 1.6, hw - 1.6]) { const p = P(hl, v, 3); c.fillRect(p.x - 1, p.y - 1, 2, 2); }   // headlights
+  c.fillStyle = '#ff3344'; for (const v of [-hw + 1.6, hw - 1.6]) { const p = P(-hl, v, 3); c.fillRect(p.x - 1, p.y - 1, 2, 2); } // taillights
 }
 
 function drawIsoThing(c, it, p) {
