@@ -455,6 +455,16 @@ assert(G.titleMode === 'menu', 'the ✕ backs out of character select');
 G.state = 'play'; G.titleMode = 'menu';
 TOUCH.on = false;
 
+// ---- WC3-style cheats (typed phrases) ----
+G.state = 'play';
+window.__cheat('GREEDISGOOD'); assert(G.eddies >= 1000000, 'cheat: greedisgood → eddies');
+window.__cheat('WAKEUPSAMURAI');
+assert(Object.keys(G.weapons).length === WEAPONS.length, 'cheat: all weapons unlocked');
+assert(Object.keys(G.cars).length === CARS.length, 'cheat: all cars unlocked');
+assert(CYBER.every(cy => G.cyber[cy.id] === cy.tiers.length), 'cheat: all chrome maxed');
+assert(G.lvl >= 25 && G.cheatGod, 'cheat: max level + godmode');
+const hpb = G.p.hp; G.p.iframes = 0; damagePlayer(99999); assert(G.p.hp === hpb && G.state === 'play', 'cheat: godmode blocks damage');
+
 console.log('SMOKE OK —',
   'kills:' + G.stats.kills,
   'weapons:' + Object.keys(G.weapons).length + '/' + WEAPONS.length,

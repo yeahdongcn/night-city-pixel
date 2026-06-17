@@ -331,6 +331,7 @@ function boot() {
     if (['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
     if (e.repeat) return;
     G.keys.add(e.code); G.pressed.add(e.code);
+    if (e.key && e.key.length === 1) { const ch = e.key.toUpperCase(); if (ch >= 'A' && ch <= 'Z') { G._cheat = ((G._cheat || '') + ch).slice(-20); checkCheat(); } }
     if (e.code === 'KeyM') { SFX.init(); msg('SOUND ' + (SFX.toggleMute() ? 'OFF' : 'ON'), '#8a93a6'); }
     if (G.state === 'play') {
       if (e.code === 'Escape') escAction();
@@ -993,7 +994,7 @@ function killEnemy(e) {
 
 function damagePlayer(dmg) {
   const p = G.p;
-  if (p.iframes > 0) return;
+  if (p.iframes > 0 || G.cheatGod) return;
   let armor = p.armor + ((G.os === 'berserk' && p.osT > 0) ? CYB.berserk.tiers[G.cyber.berserk - 1].armor : 0);
   dmg = dmg * 100 / (100 + armor);
   p.hp -= dmg;
@@ -2133,6 +2134,40 @@ function render() {
 
   c.drawImage(SPR.scan, 0, 0);
 }
+
+// =================== WC3-style cheat codes (type the phrase in-game) ===================
+function cheatWeapons() {
+  for (const w of WEAPONS) if (!G.weapons[w.id]) G.weapons[w.id] = { mag: w.mag || 0 };
+  G.skippyFound = true;
+  for (let i = 0; i < 3; i++) if (!G.loadout[i]) { const w = WEAPONS.find(w => !G.loadout.includes(w.id)); if (w) G.loadout[i] = w.id; }
+  msg('CHEAT: ALL ' + WEAPONS.length + ' WEAPONS UNLOCKED', '#2ecc71');
+}
+function cheatCars() { for (const c of CARS) G.cars[c.id] = 1; G.activeCar = 'caliburn'; msg('CHEAT: ALL ' + CARS.length + ' VEHICLES UNLOCKED', '#00ff9f'); }
+function cheatChrome() {
+  for (const cy of CYBER) { G.cyber[cy.id] = cy.tiers.length; if (cy.grants && !G.weapons[cy.grants]) G.weapons[cy.grants] = { mag: 0 }; }
+  if (!G.os) G.os = 'sandevistan';
+  recalcStats(); G.p.hp = G.p.maxhp;
+  msg('CHEAT: ALL CHROME MAXED', '#05d9e8');
+}
+function cheatLevel() { G.lvl = Math.max(G.lvl, 25); G.xp = 0; recalcStats(); G.p.hp = G.p.maxhp; msg('CHEAT: STREET CRED -> LEVEL ' + G.lvl, '#f9f002'); }
+function cheatMoney() { G.eddies += 1000000; msg('CHEAT: +EDDIES 1,000,000', '#f9f002'); }
+function cheatGod() { G.cheatGod = !G.cheatGod; G.p.hp = G.p.maxhp; msg('CHEAT: GODMODE ' + (G.cheatGod ? 'ON' : 'OFF'), G.cheatGod ? '#2ecc71' : '#ff5a5a'); }
+function cheatAll() { cheatWeapons(); cheatCars(); cheatChrome(); cheatLevel(); cheatMoney(); if (!G.cheatGod) cheatGod(); banner('WAKE UP, SAMURAI', 'EVERYTHING UNLOCKED', '#f9f002'); }
+const CHEATS = {
+  WAKEUPSAMURAI: cheatAll,                                   // everything
+  GREEDISGOOD: cheatMoney, SHOWMETHEMONEY: cheatMoney,       // eddies
+  WHOSYOURDADDY: cheatGod,                                   // godmode toggle
+  FULLARSENAL: cheatWeapons,                                 // all weapons
+  FULLCHROME: cheatChrome,                                   // all cyberware maxed
+  HELLONWHEELS: cheatCars,                                   // all vehicles
+  STREETCRED: cheatLevel,                                    // max level
+};
+function checkCheat() {
+  if (!G || G.state !== 'play' || !G.p) return;
+  const b = G._cheat || '';
+  for (const code in CHEATS) if (b.endsWith(code)) { CHEATS[code](); G._cheat = ''; SFX.levelup && SFX.levelup(); saveGame(); return; }
+}
+window.__cheat = (code) => { G._cheat = code; checkCheat(); };
 
 // ===================================================================
 // ============ ISOMETRIC RENDER OVERRIDES (v2 — Diablo style) ========

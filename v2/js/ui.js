@@ -140,28 +140,24 @@ function titleSelect(i) {
 }
 
 function titleGender(c) {
-  drawTextC(c, 'CHOOSE YOUR V', VIEW_W / 2, 148, '#05d9e8', 2);
+  drawTextC(c, 'CHOOSE YOUR V', VIEW_W / 2, 128, '#f9c84a', 2);
   if (navLeft() || navRight()) { G.uiS.sel = G.uiS.sel ? 0 : 1; SFX.ui(); }
   G.uiS.sel = G.uiS.sel ? 1 : 0;
-  const frame = (G.rt * 3 | 0) % 2;
+  const frame = (G.rt * 3 | 0) % 2, fy = 150, fw = 92, fh = 116;
   for (let i = 0; i < 2; i++) {
-    const cx = VIEW_W / 2 + (i ? 78 : -78), sel = G.uiS.sel === i;
-    const hot = uiHot(cx - 42, 168, 84, 96);
+    const cx = VIEW_W / 2 + (i ? 88 : -88), sel = G.uiS.sel === i;
+    const hot = uiHot(cx - fw / 2, fy, fw, fh);
     if (hot && G.mouse.moved) G.uiS.sel = i;
-    c.fillStyle = sel ? 'rgba(5,217,232,0.10)' : 'rgba(255,255,255,0.04)';
-    c.fillRect(cx - 42, 168, 84, 96);
-    c.strokeStyle = sel ? '#05d9e8' : 'rgba(255,255,255,0.15)';
-    c.strokeRect(cx - 41.5, 168.5, 83, 95);
+    if (sel) { c.globalCompositeOperation = 'lighter'; c.globalAlpha = 0.35; c.drawImage(SPR.glowS('#f9c84a', 72), cx - 72, fy - 8, 144, 144); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; }
+    c.fillStyle = sel ? 'rgba(249,159,28,0.10)' : 'rgba(255,255,255,0.03)'; c.fillRect(cx - fw / 2, fy, fw, fh);
+    c.strokeStyle = sel ? '#f9c84a' : 'rgba(255,255,255,0.14)'; c.lineWidth = sel ? 1.5 : 1; c.strokeRect(cx - fw / 2 + 0.5, fy + 0.5, fw - 1, fh - 1); c.lineWidth = 1;
+    if (sel) { c.fillStyle = '#f9c84a'; for (const ox of [-fw / 2, fw / 2 - 3]) for (const oy of [0, fh - 3]) c.fillRect(cx + ox, fy + oy, 3, 3); }
     c.imageSmoothingEnabled = false;
-    c.drawImage(SPR.player[i ? 'f' : 'm'].down[sel ? frame : 0], cx - 16, 178, 32, 56);
-    drawTextC(c, i ? 'FEMALE V' : 'MALE V', cx, 246, sel ? '#f9f002' : '#8a93a6', 1);
-    if (hot && G.mouse.click) {
-      G.mouse.click = false;
-      if (sel) { startGame(false, i ? 'f' : 'm'); return; }
-      G.uiS.sel = i;
-    }
+    c.drawImage(SPR.player[i ? 'f' : 'm'].down[sel ? frame : 0], cx - 22, fy + 14, 44, 77);
+    drawTextC(c, i ? 'FEMALE V' : 'MALE V', cx, fy + fh - 13, sel ? '#f9e6b4' : '#6a7286', 1);
+    if (hot && G.mouse.click) { G.mouse.click = false; if (sel) { startGame(false, i ? 'f' : 'm'); return; } G.uiS.sel = i; }
   }
-  drawTextC(c, '[A/D] SELECT · [ENTER] JACK IN · [ESC] BACK', VIEW_W / 2, 284, '#5a6372', 1);
+  drawTextC(c, '[A / D] SELECT      [ENTER] JACK IN      [ESC] BACK', VIEW_W / 2, 290, '#5a6276', 1);
   if (press('Enter') || press('Space')) { startGame(false, G.uiS.sel ? 'f' : 'm'); return; }
   if (press('Escape')) { G.titleMode = 'menu'; G.uiS.sel = 0; }
 }
