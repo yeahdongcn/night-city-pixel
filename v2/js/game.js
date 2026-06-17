@@ -2373,7 +2373,6 @@ function drawCarIso(c, x, y, a, def) {
   c.fillStyle = '#12303a'; poly([cab.b[0], cab.b[1], cab.t[1], cab.t[0]]); c.fill();    // windshield
   c.fillStyle = '#0c2230'; poly([cab.b[2], cab.b[3], cab.t[3], cab.t[2]]); c.fill();    // rear glass
   c.fillStyle = '#0e2836'; poly([cab.b[1], cab.b[2], cab.t[2], cab.t[1]]); c.fill(); poly([cab.b[3], cab.b[0], cab.t[0], cab.t[3]]); c.fill(); // side windows
-  c.strokeStyle = def.col2; c.lineWidth = 1.2; c.beginPath(); c.moveTo(lp(ch.t[0], ch.t[1], 0.5).x, lp(ch.t[0], ch.t[1], 0.5).y); c.lineTo(lp(ch.t[3], ch.t[2], 0.5).x, lp(ch.t[3], ch.t[2], 0.5).y); c.stroke(); c.lineWidth = 1; // stripe
   // lights on the front/rear bumper faces (not floating on the roof)
   c.fillStyle = '#ffe9a0'; for (const v of [-hw + 1.6, hw - 1.6]) { const p = P(hl, v, 3); c.fillRect(p.x - 1, p.y - 1, 2, 2); }   // headlights
   c.fillStyle = '#ff3344'; for (const v of [-hw + 1.6, hw - 1.6]) { const p = P(-hl, v, 3); c.fillRect(p.x - 1, p.y - 1, 2, 2); } // taillights
