@@ -428,6 +428,10 @@ function boot() {
     startGame(false); for (const car of CARS) G.cars[car.id] = 1;
     G.ui = 'inv'; G.uiS = { sel: 0, scroll: 0, tab: 2, confirm: false };
     for (let i = 0; i < 20; i++) step(1 / 60); G.bannerO = null;
+  } else if (/carspin/.test(q)) { // screenshot helper: car at several headings
+    startGame(false); G.cars.alvarado = 1; G.activeCar = 'alvarado'; G.summonCd = 0; summonCar();
+    if (G.car) { G.car.x = G.p.x + 34; G.car.y = G.p.y - 14; G.car.a = -2.36; }   // facing "north"
+    for (let i = 0; i < 16; i++) step(1 / 60); G.bannerO = null;
   }
   if (/demo/.test(q)) {
     G.eddies = 60000;
@@ -2374,10 +2378,12 @@ function drawCarIso(c, x, y, a, def, pf) {
   const hl = S.hl, hw = S.hw, z1 = S.ch, cF = hl * S.cf, cR = hl * S.cr, cz = S.cz;
   const box = (x0, x1, y0, y1, za, zb, top, side) => {
     const cs = [[x1, y0], [x1, y1], [x0, y1], [x0, y0]];                               // FL FR RR RL (x=forward)
+    const w = cs.map(([u, v]) => (x + fx * u + sxu * v) + (y + fy * u + syu * v));     // per-corner depth (wx+wy)
     const b = cs.map(([u, v]) => P(u, v, za)), tp = cs.map(([u, v]) => P(u, v, zb));
-    for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; c.fillStyle = side; poly([b[i], b[j], tp[j], tp[i]]); c.fill(); }
+    const faces = [0, 1, 2, 3].map(i => ({ i, j: (i + 1) % 4 })).sort((p, q) => (w[p.i] + w[p.j]) - (w[q.i] + w[q.j]));
+    for (const f of faces) { c.fillStyle = side; poly([b[f.i], b[f.j], tp[f.j], tp[f.i]]); c.fill(); } // far → near
     c.fillStyle = top; poly(tp); c.fill();
-    return { b, t: tp };
+    return { b, t: tp, w };
   };
   c.fillStyle = 'rgba(0,0,0,0.32)'; poly([P(hl, -hw, 0), P(hl, hw, 0), P(-hl, hw, 0), P(-hl, -hw, 0)]); c.fill();  // shadow
   // wedge nose for hypercars: a low sloped front section
@@ -2392,9 +2398,10 @@ function drawCarIso(c, x, y, a, def, pf) {
   // pickup: open cargo bed behind the cabin
   if (S.bed) { c.fillStyle = '#16161c'; poly([P(-hl + 1, -hw + 1, z1 + 0.1), P(cF, -hw + 1, z1 + 0.1), P(cF, hw - 1, z1 + 0.1), P(-hl + 1, hw - 1, z1 + 0.1)]); c.fill(); }
   const cab = box(cF, cR, -hw * 0.72, hw * 0.72, z1, cz, shade(def.col, -2), shade(def.col, -40)); // raised cabin
-  c.fillStyle = '#12303a'; poly([cab.b[0], cab.b[1], cab.t[1], cab.t[0]]); c.fill();    // windshield
-  c.fillStyle = '#0c2230'; poly([cab.b[2], cab.b[3], cab.t[3], cab.t[2]]); c.fill();    // rear glass
-  c.fillStyle = '#0e2836'; poly([cab.b[1], cab.b[2], cab.t[2], cab.t[1]]); c.fill(); poly([cab.b[3], cab.b[0], cab.t[0], cab.t[3]]); c.fill(); // side windows
+  // glass on the cabin faces, drawn near-last so far windows never show through
+  const gCol = ['#12303a', '#0e2836', '#0c2230', '#0e2836'];                            // front / right / rear / left
+  const gFaces = [0, 1, 2, 3].map(i => ({ i, j: (i + 1) % 4 })).sort((p, q) => (cab.w[p.i] + cab.w[p.j]) - (cab.w[q.i] + cab.w[q.j]));
+  for (const f of gFaces) { c.fillStyle = gCol[f.i]; poly([cab.b[f.i], cab.b[f.j], cab.t[f.j], cab.t[f.i]]); c.fill(); }
   // sporty shapes: twin hood racing stripes (only these, not every car)
   if (S.st) { c.strokeStyle = def.col2; c.lineWidth = 1; for (const yo of [-1.4, 1.4]) { const a1 = P(cR, yo, z1 + 0.05), a2 = P(hl - 1, yo, z1 + 0.05); c.beginPath(); c.moveTo(a1.x, a1.y); c.lineTo(a2.x, a2.y); c.stroke(); } }
   // lights on the front/rear bumper faces
