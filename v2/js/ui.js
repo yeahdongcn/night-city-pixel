@@ -468,9 +468,15 @@ function drawShopGuns(c) {
   drawCursorSpr(c);
 }
 
+// render the SAME iso car used in the world into a UI panel (local projector)
+function drawCarThumb(c, cx, cy, sc, id, ang) {
+  const pf = (wx, wy, z) => ({ x: cx + (wx - wy) * sc, y: cy + (wx + wy) * 0.5 * sc - z * sc * 0.9 });
+  drawCarIso(c, 0, 0, ang == null ? -0.6 : ang, CARD[id], pf);
+}
+
 function drawShopCars(c) {
   const r = shopList(c, CARS, (cc, car, x, y, on) => {
-    cc.save(); cc.translate(x + 12, y + 8); cc.rotate(Math.PI / 2); cc.drawImage(SPR.car(car.id), -8, -15, 16, 30); cc.restore();
+    drawCarThumb(cc, x + 13, y + 9, 0.5, car.id, -0.6);
     drawText(cc, trunc(car.name, 24), x + 30, y + 3, G.cars[car.id] ? '#5a6372' : '#cfd6e4', 1);
     const right = G.cars[car.id] ? (G.activeCar === car.id ? 'ACTIVE' : 'OWNED') : '€$' + fmt(car.price);
     drawTextR(cc, right, x + 272, y + 3, G.cars[car.id] ? (G.activeCar === car.id ? '#00ff9f' : '#5a6372') : G.eddies >= car.price ? '#2ecc71' : '#ff5a5a', 1);
@@ -480,8 +486,7 @@ function drawShopCars(c) {
     const dx = 360, dy = 46;
     drawText(c, car.name, dx, dy, '#e8f6ff', 1);
     drawText(c, (car.bike ? 'MOTORCYCLE' : 'CAR') + ' · ' + car.shape.toUpperCase(), dx, dy + 12, '#00ff9f', 1);
-    c.save(); c.translate(dx + 90, dy + 46); c.rotate(Math.PI / 2); c.imageSmoothingEnabled = false;
-    c.drawImage(SPR.car(car.id), -16, -30, 32, 60); c.restore();
+    drawCarThumb(c, dx + 90, dy + 48, 1.15, car.id, -0.6);
     statRow(c, dx, dy + 78, 'TOP', car.top / 360, '#f9f002', car.top);
     statRow(c, dx, dy + 90, 'ACC', car.acc / 320, '#ff5a5a', car.acc);
     statRow(c, dx, dy + 102, 'GRIP', (car.grip - 0.8) / 0.16, '#05d9e8', car.grip);
@@ -683,7 +688,7 @@ function invGarage(c) {
     c.fillStyle = s.sel === i ? 'rgba(0,255,159,0.1)' : 'rgba(255,255,255,0.04)';
     c.fillRect(x, y, cw - 6, ch - 6);
     if (have) {
-      c.save(); c.translate(x + 30, y + 22); c.rotate(Math.PI / 2); c.drawImage(SPR.car(car.id), -10, -19, 21, 39); c.restore();
+      drawCarThumb(c, x + 30, y + 24, 0.72, car.id, -0.6);
       drawText(c, trunc(car.name.split(' ').slice(-1)[0], 11), x + 58, y + 8, '#cfd6e4', 1);
       if (G.activeCar === car.id) drawText(c, 'ACTIVE', x + 58, y + 20, '#00ff9f', 1);
       if (hot && G.mouse.click) { G.mouse.click = false; setActiveCar(car.id); }
