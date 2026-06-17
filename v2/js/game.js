@@ -2335,6 +2335,41 @@ function drawIsoHolo(c, h) {
   c.globalAlpha = 0.82 + 0.1 * Math.sin(G.rt * 7 + h.x); c.fillStyle = 'rgba(8,12,20,0.85)'; c.fillRect(o2.x - hw / 2, o2.y - 7, hw, 13); c.strokeStyle = h.col; c.strokeRect(o2.x - hw / 2 + 0.5, o2.y - 6.5, hw - 1, 12); drawTextC(c, h.text, o2.x, o2.y - 3, h.col, 1); c.globalAlpha = 1;
 }
 
+// proper 2.5D car: raised body box, four wheels at the corners, windshield, stripe, lights
+function drawCarIso(c, x, y, a, def) {
+  const fx = Math.cos(a), fy = Math.sin(a), sxu = -fy, syu = fx;
+  const poly = pts => { c.beginPath(); c.moveTo(pts[0].x, pts[0].y); for (let i = 1; i < pts.length; i++) c.lineTo(pts[i].x, pts[i].y); c.closePath(); };
+  const lp = (u, v, f) => ({ x: u.x + (v.x - u.x) * f, y: u.y + (v.y - u.y) * f });
+  if (def.bike) {
+    const wF = proj(x + fx * 7, y + fy * 7, 0), wR = proj(x - fx * 7, y - fy * 7, 0);
+    c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); c.ellipse((wF.x + wR.x) / 2, (wF.y + wR.y) / 2, 9, 4, 0, 0, 7); c.fill();
+    c.fillStyle = '#0a0a0c'; for (const pp of [wF, wR]) { c.beginPath(); c.ellipse(pp.x, pp.y, 3, 2.4, 0, 0, 7); c.fill(); }
+    const bFg = proj(x + fx * 5, y + fy * 5, 0), bRg = proj(x - fx * 5, y - fy * 5, 0), bF = proj(x + fx * 5, y + fy * 5, 6), bR = proj(x - fx * 5, y - fy * 5, 6);
+    c.fillStyle = shade(def.col, -26); poly([bFg, bRg, bR, bF]); c.fill();
+    c.strokeStyle = def.col; c.lineWidth = 3; c.beginPath(); c.moveTo(bF.x, bF.y); c.lineTo(bR.x, bR.y); c.stroke(); c.lineWidth = 1;
+    c.fillStyle = def.col2; c.fillRect((bF.x + bR.x) / 2 - 1, (bF.y + bR.y) / 2 - 1, 2, 2);
+    const hd = proj(x + fx * 7, y + fy * 7, 5); c.fillStyle = '#ffe9a0'; c.fillRect(hd.x - 1, hd.y - 2, 2, 2);
+    return;
+  }
+  const hl = def.shape === 'van' ? 17 : 15, hw = 7, lift = 4, H = 7;
+  const cor = [[hl, -hw], [hl, hw], [-hl, hw], [-hl, -hw]];                            // FL FR RR RL
+  const P = (u, v, z) => proj(x + fx * u + sxu * v, y + fy * u + syu * v, z);
+  const sh = cor.map(([u, v]) => P(u, v, 0)), gb = cor.map(([u, v]) => P(u, v, lift)), t = cor.map(([u, v]) => P(u, v, lift + H));
+  c.fillStyle = 'rgba(0,0,0,0.34)'; poly(sh); c.fill();                                // shadow
+  for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; c.fillStyle = shade(def.col, -32); poly([gb[i], gb[j], t[j], t[i]]); c.fill(); } // raised body sides
+  c.fillStyle = def.col; poly(t); c.fill();                                            // roof/top
+  c.fillStyle = shade(def.col, 20); poly([t[0], t[1], lp(t[1], t[2], 0.5), lp(t[0], t[3], 0.5)]); c.fill();           // front sheen
+  c.fillStyle = '#0d2530'; poly([lp(t[0], t[3], 0.2), lp(t[1], t[2], 0.2), lp(t[1], t[2], 0.52), lp(t[0], t[3], 0.52)]); c.fill();  // windshield
+  c.strokeStyle = def.col2; c.lineWidth = 1.5; c.beginPath(); c.moveTo(lp(t[0], t[1], 0.5).x, lp(t[0], t[1], 0.5).y); c.lineTo(lp(t[3], t[2], 0.5).x, lp(t[3], t[2], 0.5).y); c.stroke(); c.lineWidth = 1; // stripe
+  c.fillStyle = '#ffe9a0'; for (const pp of [t[0], t[1]]) c.fillRect(pp.x - 1, pp.y - 1, 2, 2);  // headlights
+  c.fillStyle = '#ff3344'; for (const pp of [t[2], t[3]]) c.fillRect(pp.x - 1, pp.y - 1, 2, 2);  // taillights
+  // wheels LAST, at ground level + outset, so they poke out below the raised chassis
+  for (const [u, v] of [[hl - 4, -hw - 1], [hl - 4, hw + 1], [-hl + 4, hw + 1], [-hl + 4, -hw - 1]]) {
+    const w = P(u, v, 1); c.fillStyle = '#0a0a0c'; c.beginPath(); c.ellipse(w.x, w.y, 3.4, 2.6, 0, 0, 7); c.fill();
+    c.fillStyle = '#33333c'; c.beginPath(); c.ellipse(w.x, w.y, 1.4, 1.1, 0, 0, 7); c.fill();
+  }
+}
+
 function drawIsoThing(c, it, p) {
   if (it.k === 'wall') {
     let a = isoRoofAlphaAt(it.tx, it.ty); if (a < 0.04) return;
@@ -2354,7 +2389,7 @@ function drawIsoThing(c, it, p) {
   switch (it.k) {
     case 'crate': isoCube(c, o.x, o.y, 6.5, 9, '#5a4632', '#46341f', '#2f2415', '#f9f002'); break;
     case 'vend': isoSprite(c, SPR.vend, o.x, o.y, 6, 14, true); break;
-    case 'disp': isoSprite(c, SPR.car(o.id), o.x, o.y, 8, 26, true); break;
+    case 'disp': drawCarIso(c, o.x, o.y, -0.9, CARD[o.id]); break;
     case 'bush': isoSprite(c, SPR.bush(o.kind), o.x, o.y, 8, 12, false); break;
     case 'pick': {
       const s = proj(o.x, o.y, 0), bob = Math.sin(G.rt * 4 + o.x) * 1.2;
@@ -2377,15 +2412,7 @@ function drawIsoThing(c, it, p) {
     }
     case 'civ': { const fc = SPR.civ(o.i)[o.face === 'side' ? 'side' : o.face][Math.floor(o.anim) % 2]; isoBill(c, fc, o.x, o.y, 1, 1, o.face === 'side' && o.flip); break; }
     case 'npc': { const fc = SPR.civ(o.i).down[0]; isoBill(c, fc, o.x, o.y, 1, 1, false); const s = proj(o.x, o.y, 0); drawTextC(c, o.name, s.x, s.y - 22, o.kind === 'joy' || o.kind === 'doll' ? '#ff2a6d' : '#5a6372', 1); break; }
-    case 'car': {
-      const car = o, s = proj(car.x, car.y, 0), h2 = proj(car.x + Math.cos(car.a), car.y + Math.sin(car.a), 0), ang = Math.atan2(h2.y - s.y, h2.x - s.x), def = CARD[car.id];
-      c.save(); c.translate(s.x, s.y - 5); c.rotate(ang);
-      c.fillStyle = 'rgba(0,0,0,0.4)'; c.fillRect(-13, -4, 26, 9);
-      c.fillStyle = def.col; c.fillRect(-13, -6, 26, 11); c.fillStyle = shade(def.col, 22); c.fillRect(-13, -6, 26, 3);
-      c.fillStyle = '#0d2530'; c.fillRect(3, -4, 7, 8); c.fillStyle = def.col2; c.fillRect(-13, -2, 2, 4);
-      c.fillStyle = '#ffe9a0'; c.fillRect(11, -5, 2, 2); c.fillRect(11, 2, 2, 2);
-      c.restore(); break;
-    }
+    case 'car': drawCarIso(c, o.x, o.y, o.a, CARD[o.id]); break;
     case 'player': {
       const ped = SPR.player[G.gender] || SPR.player.m;
       for (const tr of p.trail) { const fc = ped[tr.face === 'side' ? 'side' : tr.face][0]; isoBill(c, fc, tr.x, tr.y, tr.t * 1.2, 1, tr.face === 'side' && tr.flip, false); }
