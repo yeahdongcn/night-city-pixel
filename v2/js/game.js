@@ -432,6 +432,8 @@ function boot() {
     startGame(false); G.cars.alvarado = 1; G.activeCar = 'alvarado'; G.summonCd = 0; summonCar();
     if (G.car) { G.car.x = G.p.x + 34; G.car.y = G.p.y - 14; G.car.a = -2.36; }   // facing "north"
     for (let i = 0; i < 16; i++) step(1 / 60); G.bannerO = null;
+  } else if (/cargrid/.test(q)) { // screenshot helper: the car at 12 headings on one screen
+    startGame(false); const m = q.match(/car=(\w+)/); G._cargrid = (m && CARD[m[1]]) ? m[1] : 'alvarado';
   }
   if (/demo/.test(q)) {
     G.eddies = 60000;
@@ -2220,9 +2222,23 @@ function isoSprite(c, spr, x, y, ax, ay, shadow) {
   c.drawImage(spr, Math.round(s.x - ax), Math.round(s.y - ay));
 }
 
+function drawCarGrid(c) {
+  c.fillStyle = '#0a0c12'; c.fillRect(0, 0, VIEW_W, VIEW_H);
+  const def = CARD[G._cargrid], cols = 6, rows = 2, n = 12, sc = 1.4;
+  drawTextC(c, 'CAR @ 12 HEADINGS — ' + def.name, VIEW_W / 2, 4, '#f9c84a', 1);
+  for (let k = 0; k < n; k++) {
+    const ang = k / n * Math.PI * 2;
+    const cx = (k % cols + 0.5) * (VIEW_W / cols), cy = (Math.floor(k / cols) + 0.5) * (VIEW_H / rows) + 6;
+    const pf = (wx, wy, z) => ({ x: cx + (wx - wy) * sc, y: cy + (wx + wy) * 0.5 * sc - z * sc * 0.9 });
+    drawCarIso(c, 0, 0, ang, def, pf);
+    drawTextC(c, (ang * 57.3 | 0) + 'DEG', cx, cy + 30, '#5a6372', 1);
+  }
+}
+
 function render() {
   const c = C;
   c.fillStyle = '#06060a'; c.fillRect(0, 0, VIEW_W, VIEW_H);
+  if (G._cargrid) { drawCarGrid(c); return; }
   if (G.state === 'title') { drawTitle(c); c.drawImage(SPR.scan, 0, 0); return; }
   const p = G.p;
   G._shx = G.shake > 0 ? rnd(-G.shake, G.shake) : 0;
@@ -2404,9 +2420,10 @@ function drawCarIso(c, x, y, a, def, pf) {
   for (const f of gFaces) { c.fillStyle = gCol[f.i]; poly([cab.b[f.i], cab.b[f.j], cab.t[f.j], cab.t[f.i]]); c.fill(); }
   // sporty shapes: twin hood racing stripes (only these, not every car)
   if (S.st) { c.strokeStyle = def.col2; c.lineWidth = 1; for (const yo of [-1.4, 1.4]) { const a1 = P(cR, yo, z1 + 0.05), a2 = P(hl - 1, yo, z1 + 0.05); c.beginPath(); c.moveTo(a1.x, a1.y); c.lineTo(a2.x, a2.y); c.stroke(); } }
-  // lights on the front/rear bumper faces
-  c.fillStyle = '#ffe9a0'; for (const v of [-hw + 1.6, hw - 1.6]) { const p = P(hl, v, S.wedge ? 1.8 : 3); c.fillRect(p.x - 1, p.y - 1, 2, 2); }
-  c.fillStyle = '#ff3344'; for (const v of [-hw + 1.6, hw - 1.6]) { const p = P(-hl, v, 3); c.fillRect(p.x - 1, p.y - 1, 2, 2); }
+  // lights only on the bumper face that points toward the camera (else they'd shine through the body)
+  const toward = fx + fy;                                                              // >0 ⇒ nose is the near face
+  if (toward > -0.3) { c.fillStyle = '#ffe9a0'; for (const v of [-hw + 1.6, hw - 1.6]) { const p = P(hl, v, S.wedge ? 1.8 : 3); c.fillRect(p.x - 1, p.y - 1, 2, 2); } }
+  if (toward < 0.3) { c.fillStyle = '#ff3344'; for (const v of [-hw + 1.6, hw - 1.6]) { const p = P(-hl, v, 3); c.fillRect(p.x - 1, p.y - 1, 2, 2); } }
 }
 
 function drawIsoThing(c, it, p) {
