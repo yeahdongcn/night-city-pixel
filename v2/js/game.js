@@ -2351,23 +2351,30 @@ function drawCarIso(c, x, y, a, def) {
     const hd = proj(x + fx * 7, y + fy * 7, 5); c.fillStyle = '#ffe9a0'; c.fillRect(hd.x - 1, hd.y - 2, 2, 2);
     return;
   }
-  const hl = def.shape === 'van' ? 12 : 10, hw = 5, lift = 2.5, H = 4.5;
-  const cor = [[hl, -hw], [hl, hw], [-hl, hw], [-hl, -hw]];                            // FL FR RR RL
+  // ---- car: low chassis + a raised, narrower cabin (so it reads as a car, not a box) ----
+  const hl = def.shape === 'van' ? 13 : 11, hw = 5.5;
   const P = (u, v, z) => proj(x + fx * u + sxu * v, y + fy * u + syu * v, z);
-  const sh = cor.map(([u, v]) => P(u, v, 0)), gb = cor.map(([u, v]) => P(u, v, lift)), t = cor.map(([u, v]) => P(u, v, lift + H));
-  c.fillStyle = 'rgba(0,0,0,0.34)'; poly(sh); c.fill();                                // shadow
-  for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; c.fillStyle = shade(def.col, -32); poly([gb[i], gb[j], t[j], t[i]]); c.fill(); } // raised body sides
-  c.fillStyle = def.col; poly(t); c.fill();                                            // roof/top
-  c.fillStyle = shade(def.col, 20); poly([t[0], t[1], lp(t[1], t[2], 0.5), lp(t[0], t[3], 0.5)]); c.fill();           // front sheen
-  c.fillStyle = '#0d2530'; poly([lp(t[0], t[3], 0.22), lp(t[1], t[2], 0.22), lp(t[1], t[2], 0.55), lp(t[0], t[3], 0.55)]); c.fill();  // windshield
-  c.strokeStyle = def.col2; c.lineWidth = 1; c.beginPath(); c.moveTo(lp(t[0], t[1], 0.5).x, lp(t[0], t[1], 0.5).y); c.lineTo(lp(t[3], t[2], 0.5).x, lp(t[3], t[2], 0.5).y); c.stroke(); // stripe
-  c.fillStyle = '#ffe9a0'; for (const pp of [t[0], t[1]]) c.fillRect(pp.x - 1, pp.y - 1, 2, 2);  // headlights
-  c.fillStyle = '#ff3344'; for (const pp of [t[2], t[3]]) c.fillRect(pp.x - 1, pp.y - 1, 2, 2);  // taillights
-  // wheels LAST, at ground level + outset, so they poke out below the raised chassis
-  for (const [u, v] of [[hl - 3, -hw - 1], [hl - 3, hw + 1], [-hl + 3, hw + 1], [-hl + 3, -hw - 1]]) {
-    const w = P(u, v, 1); c.fillStyle = '#0a0a0c'; c.beginPath(); c.ellipse(w.x, w.y, 2.6, 2, 0, 0, 7); c.fill();
-    c.fillStyle = '#33333c'; c.beginPath(); c.ellipse(w.x, w.y, 1.1, 0.9, 0, 0, 7); c.fill();
-  }
+  const box = (x0, x1, y0, y1, z0, z1, top, side) => {
+    const cs = [[x1, y0], [x1, y1], [x0, y1], [x0, y0]];                               // FL FR RR RL (x=forward)
+    const b = cs.map(([u, v]) => P(u, v, z0)), tp = cs.map(([u, v]) => P(u, v, z1));
+    for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; c.fillStyle = side; poly([b[i], b[j], tp[j], tp[i]]); c.fill(); }
+    c.fillStyle = top; poly(tp); c.fill();
+    return { b, t: tp };
+  };
+  c.fillStyle = 'rgba(0,0,0,0.32)'; poly([P(hl, -hw, 0), P(hl, hw, 0), P(-hl, hw, 0), P(-hl, -hw, 0)]); c.fill();  // shadow
+  // wheels first — the chassis fenders tuck over their tops
+  c.fillStyle = '#0b0b0e';
+  for (const [u, v] of [[hl - 3, -hw], [hl - 3, hw], [-hl + 3, -hw], [-hl + 3, hw]]) { const w = P(u, v, 1.4); c.beginPath(); c.ellipse(w.x, w.y, 2.7, 2.2, 0, 0, 7); c.fill(); }
+  const ch = box(-hl, hl, -hw, hw, 2.2, 4.6, def.col, shade(def.col, -34));            // low chassis slab
+  c.fillStyle = shade(def.col, 16); poly([ch.t[0], ch.t[1], lp(ch.t[1], ch.t[2], 0.5), lp(ch.t[0], ch.t[3], 0.5)]); c.fill(); // hood sheen
+  const cab = box(-hl * 0.55, hl * 0.3, -hw * 0.72, hw * 0.72, 4.6, 7.8, shade(def.col, -2), shade(def.col, -40)); // raised cabin
+  c.fillStyle = '#12303a'; poly([cab.b[0], cab.b[1], cab.t[1], cab.t[0]]); c.fill();    // windshield
+  c.fillStyle = '#0c2230'; poly([cab.b[2], cab.b[3], cab.t[3], cab.t[2]]); c.fill();    // rear glass
+  c.fillStyle = '#0e2836'; poly([cab.b[1], cab.b[2], cab.t[2], cab.t[1]]); c.fill();    // right windows
+  poly([cab.b[3], cab.b[0], cab.t[0], cab.t[3]]); c.fill();                             // left windows
+  c.strokeStyle = def.col2; c.lineWidth = 1.2; c.beginPath(); c.moveTo(lp(ch.t[0], ch.t[1], 0.5).x, lp(ch.t[0], ch.t[1], 0.5).y); c.lineTo(lp(ch.t[3], ch.t[2], 0.5).x, lp(ch.t[3], ch.t[2], 0.5).y); c.stroke(); c.lineWidth = 1; // stripe
+  c.fillStyle = '#ffe9a0'; for (const pp of [ch.t[0], ch.t[1]]) c.fillRect(pp.x - 1, pp.y - 1, 2, 2);  // headlights
+  c.fillStyle = '#ff3344'; for (const pp of [ch.t[2], ch.t[3]]) c.fillRect(pp.x - 1, pp.y - 1, 2, 2);  // taillights
 }
 
 function drawIsoThing(c, it, p) {
