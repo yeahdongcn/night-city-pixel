@@ -2156,6 +2156,7 @@ function render() {
   const p = G.p;
   G._shx = G.shake > 0 ? rnd(-G.shake, G.shake) : 0;
   G._shy = G.shake > 0 ? rnd(-G.shake, G.shake) : 0;
+  G._pscr = proj(p.x, p.y, 0); G._pdep = p.x + p.y;  // for building-fade occlusion
 
   // visible tile bounds from inverse-projected screen corners
   const a0 = invProj(0, 0), a1 = invProj(VIEW_W, 0), a2 = invProj(0, VIEW_H), a3 = invProj(VIEW_W, VIEW_H);
@@ -2165,10 +2166,12 @@ function render() {
   let minTY = clamp((Math.min(a0.y, a1.y, a2.y, a3.y) / TILE - 2) | 0, 0, WORLD.H - 1);
   let maxTY = clamp((Math.max(a0.y, a1.y, a2.y, a3.y) / TILE + 8) | 0, 0, WORLD.H - 1);
 
-  // ground (non-building tiles)
+  // ground (non-building tiles); collect lit doorways
+  const doors = [];
   for (let ty = minTY; ty <= maxTY; ty++) for (let tx = minTX; tx <= maxTX; tx++) {
     const v = T[ty * W + tx]; if (v === WT.BLDG) continue;
-    isoGroundTile(c, tx, ty, GCOL[v] || '#16161e');
+    if (v === WT.DOOR) { isoGroundTile(c, tx, ty, '#4a3414'); doors.push([tx, ty]); }
+    else isoGroundTile(c, tx, ty, GCOL[v] || '#16161e');
   }
   for (const pd of WORLD.puddles) { if (!isoVisible(pd.x, pd.y, 20)) continue; const s = proj(pd.x, pd.y, 0); c.globalAlpha = 0.06 + 0.04 * Math.sin(G.rt * 2 + pd.x); c.fillStyle = pd.col; c.beginPath(); c.ellipse(s.x, s.y, pd.w / 2, pd.h / 4, 0, 0, 7); c.fill(); }
   c.globalAlpha = 1;
@@ -2177,7 +2180,7 @@ function render() {
   const D = [];
   for (let ty = minTY; ty <= maxTY; ty++) for (let tx = minTX; tx <= maxTX; tx++) if (T[ty * W + tx] === WT.BLDG) D.push({ d: (tx + ty + 1) * TILE, k: 'wall', tx, ty });
   const push = (x, y, k, o) => { if (isoVisible(x, y, 90)) D.push({ d: x + y, k, o }); };
-  for (const cr of G.crates) if (cr.hp > 0) push(cr.x, cr.y, 'crate', cr);
+  for (const cr of G.crates) if (cr.hp > 0 && !crateHidden(cr)) push(cr.x, cr.y, 'crate', cr);
   for (const vn of WORLD.vends) push(vn.x, vn.y, 'vend', vn);
   for (const dp of WORLD.displays) push(dp.x, dp.y, 'disp', dp);
   for (const bu of WORLD.bushes) push(bu.x, bu.y, 'bush', bu);
@@ -2188,10 +2191,14 @@ function render() {
   if (G.car && !G.car.dead) push(G.car.x, G.car.y, 'car', G.car);
   if (!G.driving) push(p.x, p.y, 'player', p);
   if (G.airdrop) push(G.airdrop.x, G.airdrop.y, 'air', G.airdrop);
-  for (const h of WORLD.holos) push(h.x, h.y, 'holo', h);
-  for (const sg of WORLD.signs) push(sg.x, sg.y, 'sign', sg);
+  // occluders to keep visible: V + every on-screen enemy (buildings in front of them fade)
+  G._occ = [{ sx: G._pscr.x, sy: G._pscr.y, d: G._pdep, big: G.driving }];
+  for (const e of G.enemies) { if (e.dead) continue; const es = proj(e.x, e.y, 0); if (es.x > -20 && es.x < VIEW_W + 20 && es.y > -20 && es.y < VIEW_H + 40) G._occ.push({ sx: es.x, sy: es.y, d: e.x + e.y, big: e.big || e.psycho }); }
   D.sort((u, v) => u.d - v.d);
   for (const it of D) drawIsoThing(c, it, p);
+  // name banners + holos drawn AFTER buildings so they're never hidden
+  for (const sg of WORLD.signs) drawIsoSign(c, sg);
+  for (const h of WORLD.holos) drawIsoHolo(c, h);
 
   // slashes / bullets / particles
   for (const s of G.slashes) { const o = proj(s.x, s.y, 0); c.strokeStyle = s.col; c.globalAlpha = s.t / 0.16; c.lineWidth = 2; c.beginPath(); c.ellipse(o.x, o.y - 2, s.range, s.range * 0.5, 0, s.a - 0.9, s.a + 0.9); c.stroke(); c.globalAlpha = 1; c.lineWidth = 1; }
@@ -2205,7 +2212,8 @@ function render() {
   for (const sg of WORLD.signs) { if (!isoVisible(sg.x, sg.y, 60)) continue; const o = proj(sg.x, sg.y, isoTileHeight((sg.x / TILE) | 0, (sg.y / TILE) | 0) + 6); const gr = sg.big ? 26 : 18; c.globalAlpha = (sg.big ? 0.22 : 0.16) + 0.05 * Math.sin(G.rt * 3 + sg.x); c.drawImage(SPR.glowS(sg.col, gr), o.x - gr, o.y - gr); }
   for (const L of WORLD.lights) { if (!isoVisible(L.x, L.y, 30)) continue; const o = proj(L.x, L.y, 6); c.globalAlpha = 0.22; c.drawImage(SPR.glowS('#ffd9a0', 12), o.x - 12, o.y - 12); }
   for (const vn of WORLD.vends) { if (!isoVisible(vn.x, vn.y)) continue; const o = proj(vn.x, vn.y, 8); c.globalAlpha = 0.28; c.drawImage(SPR.glowS('#05d9e8', 12), o.x - 12, o.y - 12); }
-  for (const cr of G.crates) { if (cr.hp <= 0 || !isoVisible(cr.x, cr.y)) continue; const o = proj(cr.x, cr.y, 5); c.globalAlpha = 0.12 + 0.07 * Math.sin(G.rt * 3 + cr.x); c.drawImage(SPR.glowS('#f9f002', 9), o.x - 9, o.y - 9); }
+  for (const cr of G.crates) { if (cr.hp <= 0 || !isoVisible(cr.x, cr.y) || crateHidden(cr)) continue; const o = proj(cr.x, cr.y, 5); c.globalAlpha = 0.12 + 0.07 * Math.sin(G.rt * 3 + cr.x); c.drawImage(SPR.glowS('#f9f002', 9), o.x - 9, o.y - 9); }
+  for (const d of doors) { const o = proj((d[0] + 0.5) * TILE, (d[1] + 0.5) * TILE, 2); c.globalAlpha = 0.4 + 0.14 * Math.sin(G.rt * 3 + d[0]); c.drawImage(SPR.glowS('#ffb24a', 13), o.x - 13, o.y - 13); }
   for (const pk of G.pickups) { if (!isoVisible(pk.x, pk.y)) continue; const o = proj(pk.x, pk.y, 4); c.globalAlpha = 0.4 + 0.15 * Math.sin(G.rt * 5); const col = pk.kind === 'wpn' ? RAR_COL[WPN[pk.id].rar] : pk.kind === 'ed' ? '#f9f002' : '#2ecc71'; c.drawImage(SPR.glowS(col, 10), o.x - 10, o.y - 10); }
   for (const b of G.bullets) { const o = proj(b.x, b.y, 5); c.globalAlpha = 0.5; c.drawImage(SPR.glowS(b.col, 5), o.x - 5, o.y - 5); }
   c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
@@ -2235,19 +2243,55 @@ function render() {
   c.drawImage(SPR.scan, 0, 0);
 }
 
+// indoor crates stay hidden until V enters (the building's walls have faded)
+function crateHidden(cr) {
+  return WORLD.tileAt(cr.x, cr.y) >= 5 && isoRoofAlphaAt((cr.x / TILE) | 0, (cr.y / TILE) | 0) > 0.55;
+}
+function occludesActor(tx, ty, htPx) {
+  // fade this building tile if it stands in front of (covers) V or any on-screen enemy
+  const bc = proj((tx + 0.5) * TILE, (ty + 0.5) * TILE, 0), top = bc.y - htPx * ISO_ZK - 8;
+  const dep = (tx + ty + 1) * TILE;
+  for (let i = 0; i < G._occ.length; i++) {
+    const a = G._occ[i]; if (dep <= a.d + 4) continue;                 // tile must be in front of the actor
+    const mx = a.big ? 22 : 14, py = a.sy - 7;
+    if (a.sx > bc.x - mx && a.sx < bc.x + mx && py > top && py < bc.y + 9) return true;
+  }
+  return false;
+}
+function drawIsoSign(c, sg) {
+  if (!isoVisible(sg.x, sg.y, 60)) return;
+  const rfA = sg.roof != null && WORLD.roofs[sg.roof] ? WORLD.roofs[sg.roof].a : 1;
+  const o2 = proj(sg.x, sg.y, isoTileHeight((sg.x / TILE) | 0, (sg.y / TILE) | 0) + 8), flick = Math.random() < 0.02 ? 0.4 : 1;
+  c.globalAlpha = (0.78 + 0.22 * Math.sin(G.rt * 3 + sg.x)) * flick * rfA;
+  drawTextC(c, sg.text, o2.x, o2.y, sg.col, sg.big ? 2 : 1); c.globalAlpha = 1;
+}
+function drawIsoHolo(c, h) {
+  if (!isoVisible(h.x, h.y, 60)) return;
+  const bob = Math.sin(G.rt * 1.2 + h.x * 0.1) * 2, o2 = proj(h.x, h.y, 44 + bob), hw = Math.max(34, textW(h.text) + 10);
+  c.globalAlpha = 0.82 + 0.1 * Math.sin(G.rt * 7 + h.x); c.fillStyle = 'rgba(8,12,20,0.85)'; c.fillRect(o2.x - hw / 2, o2.y - 7, hw, 13); c.strokeStyle = h.col; c.strokeRect(o2.x - hw / 2 + 0.5, o2.y - 6.5, hw - 1, 12); drawTextC(c, h.text, o2.x, o2.y - 3, h.col, 1); c.globalAlpha = 1;
+}
+
 function drawIsoThing(c, it, p) {
-  if (it.k === 'wall') { const a = isoRoofAlphaAt(it.tx, it.ty); if (a < 0.04) return; isoBlock(c, it.tx, it.ty, isoTileHeight(it.tx, it.ty), isoWallPal(it.tx, it.ty), a); return; }
+  if (it.k === 'wall') {
+    let a = isoRoofAlphaAt(it.tx, it.ty); if (a < 0.04) return;
+    const ht = isoTileHeight(it.tx, it.ty);
+    if (a > 0.5 && occludesActor(it.tx, it.ty, ht)) a = 0.3;            // fade buildings covering V or enemies
+    isoBlock(c, it.tx, it.ty, ht, isoWallPal(it.tx, it.ty), a);
+    if (a > 0.55) isoWindows(c, it.tx, it.ty, ht, a);
+    return;
+  }
   const o = it.o;
   switch (it.k) {
-    case 'crate': isoSprite(c, SPR.crate, o.x, o.y, 6, 9, true); break;
+    case 'crate': isoCube(c, o.x, o.y, 6.5, 9, '#5a4632', '#46341f', '#2f2415', '#f9f002'); break;
     case 'vend': isoSprite(c, SPR.vend, o.x, o.y, 6, 14, true); break;
     case 'disp': isoSprite(c, SPR.car(o.id), o.x, o.y, 8, 26, true); break;
     case 'bush': isoSprite(c, SPR.bush(o.kind), o.x, o.y, 8, 12, false); break;
     case 'pick': {
-      const s = proj(o.x, o.y, 0), bob = Math.sin(G.rt * 4 + o.x) * 1.5;
-      if (o.kind === 'wpn') { const w = WPN[o.id]; c.globalAlpha = 0.3; c.fillStyle = RAR_COL[w.rar]; c.fillRect(s.x - 1, s.y - 34, 2, 34); c.globalAlpha = 1; c.drawImage(SPR.wicon(w.cls, KIND_COL[w.kind]), s.x - 8, s.y - 4 + bob, 16, 7); }
-      else if (o.kind === 'ed') { c.fillStyle = '#f9f002'; c.fillRect(s.x - 1, s.y - 1 + bob, 3, 3); }
-      else { c.fillStyle = '#fff'; c.fillRect(s.x - 3, s.y - 1 + bob, 6, 2); c.fillRect(s.x - 1, s.y - 3 + bob, 2, 6); }
+      const s = proj(o.x, o.y, 0), bob = Math.sin(G.rt * 4 + o.x) * 1.2;
+      c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); c.ellipse(s.x, s.y, 4, 2, 0, 0, 7); c.fill();
+      if (o.kind === 'wpn') { const w = WPN[o.id]; c.globalAlpha = 0.3; c.fillStyle = RAR_COL[w.rar]; c.fillRect(s.x - 1, s.y - 34, 2, 34); c.globalAlpha = 1; c.drawImage(SPR.wicon(w.cls, KIND_COL[w.kind]), s.x - 8, s.y - 9 + bob, 16, 7); }
+      else if (o.kind === 'ed') { c.fillStyle = '#b8860b'; c.beginPath(); c.ellipse(s.x, s.y - 4 + bob, 2.4, 3.4, 0, 0, 7); c.fill(); c.fillStyle = '#f9f002'; c.beginPath(); c.ellipse(s.x, s.y - 4 + bob, 1.2, 3, 0, 0, 7); c.fill(); }
+      else { c.fillStyle = '#e8e8ee'; c.fillRect(s.x - 3, s.y - 8 + bob, 6, 6); c.fillStyle = '#ff2a3c'; c.fillRect(s.x - 1, s.y - 7 + bob, 2, 4); c.fillRect(s.x - 2, s.y - 6 + bob, 4, 2); }
       break;
     }
     case 'enemy': {

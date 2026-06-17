@@ -31,10 +31,10 @@ const _WALL_PALS = [
   { top: '#322c34', lt: '#28232a', dk: '#181420' },
 ];
 function isoTileHeight(tx, ty) {
-  // coarse region (≈ building footprint) → consistent flat-roof height 2.4..4.8 tiles
+  // coarse region (≈ building footprint) → consistent flat-roof height (shorter so V isn't swallowed)
   const h = (((tx / 5) | 0) * 73856 ^ ((ty / 5) | 0) * 19349) >>> 0;
-  if (tx <= 1 || ty <= 1 || tx >= WORLD.W - 2 || ty >= WORLD.H - 2) return 70; // border ring tall
-  return (38 + (h % 5) * 12); // px
+  if (tx <= 1 || ty <= 1 || tx >= WORLD.W - 2 || ty >= WORLD.H - 2) return 54; // border ring
+  return (26 + (h % 4) * 9); // px (≈26..53)
 }
 function isoWallPal(tx, ty) {
   const k = (((tx / 5) | 0) * 31 + ((ty / 5) | 0) * 17) & 3;
@@ -67,6 +67,41 @@ function isoBlock(c, tx, ty, htPx, pal, alpha) {
   // edge highlight on top
   c.strokeStyle = shade(pal.top, 14); c.lineWidth = 1; c.stroke();
   c.globalAlpha = 1; c.lineWidth = 1;
+}
+
+// ---- lit windows on the two visible wall faces of a block ----
+function isoWindows(c, tx, ty, htPx, alpha) {
+  const x0 = tx * TILE, y0 = ty * TILE, x1 = x0 + TILE, y1 = y0 + TILE, zh = htPx * ISO_ZK;
+  const gE = proj(x1, y0, 0), gS = proj(x1, y1, 0), gW = proj(x0, y1, 0);
+  const rng = mulberry32((tx * 73 + ty * 911) | 0);
+  const rows = Math.max(1, Math.floor(htPx / 14));
+  c.globalAlpha = (alpha == null ? 1 : alpha);
+  const face = (a, b) => { // a,b = ground corners of the face (E-S or W-S)
+    for (let r = 0; r < rows; r++) {
+      const wy = -(r + 0.55) * (zh / rows);
+      for (let u = 0.26; u < 0.85; u += 0.32) {
+        if (rng() < 0.4) continue;
+        const px = a.x + (b.x - a.x) * u, py = a.y + (b.y - a.y) * u + wy;
+        c.fillStyle = rng() < 0.5 ? '#ffd27a' : '#7ad7ff';
+        c.fillRect(px - 1, py - 1, 2, 2);
+      }
+    }
+  };
+  face(gE, gS); face(gW, gS);
+  c.globalAlpha = 1;
+}
+
+// ---- free-standing iso cube (crate / chest), feet at world (x,y) ----
+function isoCube(c, x, y, w, h, top, lt, dk, marker) {
+  const s = proj(x, y, 0), hw = w, zh = h;
+  c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); c.ellipse(s.x, s.y, hw, hw * 0.5, 0, 0, 7); c.fill();
+  // SW face
+  c.fillStyle = dk; c.beginPath(); c.moveTo(s.x - hw, s.y - hw * 0.5); c.lineTo(s.x, s.y); c.lineTo(s.x, s.y - zh); c.lineTo(s.x - hw, s.y - hw * 0.5 - zh); c.closePath(); c.fill();
+  // SE face
+  c.fillStyle = lt; c.beginPath(); c.moveTo(s.x + hw, s.y - hw * 0.5); c.lineTo(s.x, s.y); c.lineTo(s.x, s.y - zh); c.lineTo(s.x + hw, s.y - hw * 0.5 - zh); c.closePath(); c.fill();
+  // top
+  c.fillStyle = top; c.beginPath(); c.moveTo(s.x, s.y - hw - zh); c.lineTo(s.x + hw, s.y - hw * 0.5 - zh); c.lineTo(s.x, s.y - zh); c.lineTo(s.x - hw, s.y - hw * 0.5 - zh); c.closePath(); c.fill();
+  if (marker) { c.fillStyle = marker; c.fillRect(s.x - 1, s.y - hw * 0.5 - zh - 1, 2, 2); }
 }
 
 // ---- billboard sprite (actor/prop), feet at world (x,y) ----
