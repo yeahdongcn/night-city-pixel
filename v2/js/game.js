@@ -409,6 +409,11 @@ function boot() {
     if (jj) { G.p.x = jj.x + 14; G.p.y = jj.y + 12; }
     for (let i = 0; i < 90; i++) step(1 / 60);
     G.bannerO = null;
+  } else if (/edge/.test(q)) { // screenshot helper: city's water border
+    startGame(false);
+    G.p.x = 9 * TILE; G.p.y = 30 * TILE;
+    for (let i = 0; i < 60; i++) step(1 / 60);
+    G.bannerO = null;
   }
   if (/demo/.test(q)) {
     G.eddies = 60000;
@@ -2143,6 +2148,12 @@ function isoRoofAlphaAt(tx, ty) {
   for (const r of WORLD.roofs) { if (tx >= r.tx0 && tx <= r.tx1 && ty >= r.ty0 && ty <= r.ty1 && r.a < a) a = r.a; }
   return a;
 }
+// outer frame (beyond the road grid) — rendered as the bay's water, not building blocks
+function isBorderTile(tx, ty) { return tx < 6 || ty < 6 || tx > 117 || ty > 117; }
+function isoWaterTile(c, tx, ty) {
+  const sh = Math.sin(G.rt * 1.2 + (tx - ty) * 0.55 + ty * 0.15);
+  isoGroundTile(c, tx, ty, sh > 0.6 ? '#16343f' : sh > -0.1 ? '#0e2530' : '#091a22');
+}
 function isoSprite(c, spr, x, y, ax, ay, shadow) {
   const s = proj(x, y, 0);
   if (shadow) { c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); c.ellipse(s.x, s.y, ax * 0.7, 3, 0, 0, 7); c.fill(); }
@@ -2169,7 +2180,8 @@ function render() {
   // ground (non-building tiles); collect lit doorways
   const doors = [];
   for (let ty = minTY; ty <= maxTY; ty++) for (let tx = minTX; tx <= maxTX; tx++) {
-    const v = T[ty * W + tx]; if (v === WT.BLDG) continue;
+    const v = T[ty * W + tx];
+    if (v === WT.BLDG) { if (isBorderTile(tx, ty)) isoWaterTile(c, tx, ty); continue; }
     if (v === WT.DOOR) { isoGroundTile(c, tx, ty, '#4a3414'); doors.push([tx, ty]); }
     else isoGroundTile(c, tx, ty, GCOL[v] || '#16161e');
   }
@@ -2178,7 +2190,7 @@ function render() {
 
   // depth-sorted tall things
   const D = [];
-  for (let ty = minTY; ty <= maxTY; ty++) for (let tx = minTX; tx <= maxTX; tx++) if (T[ty * W + tx] === WT.BLDG) D.push({ d: (tx + ty + 1) * TILE, k: 'wall', tx, ty });
+  for (let ty = minTY; ty <= maxTY; ty++) for (let tx = minTX; tx <= maxTX; tx++) if (T[ty * W + tx] === WT.BLDG && !isBorderTile(tx, ty)) D.push({ d: (tx + ty + 1) * TILE, k: 'wall', tx, ty });
   const push = (x, y, k, o) => { if (isoVisible(x, y, 90)) D.push({ d: x + y, k, o }); };
   for (const cr of G.crates) if (cr.hp > 0 && !crateHidden(cr)) push(cr.x, cr.y, 'crate', cr);
   for (const vn of WORLD.vends) push(vn.x, vn.y, 'vend', vn);

@@ -46,38 +46,88 @@ function navList(n, viewRows) {
   return s.sel;
 }
 
-// =================== TITLE ===================
+// =================== TITLE (Diablo-style landing) ===================
 function drawTitle(c) {
-  c.fillStyle = '#06060a'; c.fillRect(0, 0, VIEW_W, VIEW_H);
-  // skyline strip from the prerendered city
-  if (WORLD) { c.globalAlpha = 0.35; c.drawImage(WORLD.cv, 600, 600, 640, 360, 0, 0, VIEW_W, VIEW_H); c.globalAlpha = 1; }
-  c.fillStyle = 'rgba(6,6,10,0.72)'; c.fillRect(0, 0, VIEW_W, VIEW_H);
+  // atmospheric gradient sky
+  const bg = c.createLinearGradient(0, 0, 0, VIEW_H);
+  bg.addColorStop(0, '#04050b'); bg.addColorStop(0.55, '#070912'); bg.addColorStop(1, '#0b1018');
+  c.fillStyle = bg; c.fillRect(0, 0, VIEW_W, VIEW_H);
+  // distant neon haze glow behind the skyline
+  c.globalCompositeOperation = 'lighter';
+  c.globalAlpha = 0.10; c.drawImage(SPR.glowS('#ff2a6d', 120), VIEW_W / 2 - 200, VIEW_H - 200, 240, 240);
+  c.globalAlpha = 0.08; c.drawImage(SPR.glowS('#05d9e8', 120), VIEW_W / 2 - 40, VIEW_H - 190, 240, 220);
+  c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+  // skyline silhouette (built once)
+  if (!G._titleSky) {
+    const r = mulberry32(7777), b = []; let x = -12;
+    while (x < VIEW_W + 12) {
+      const w = 16 + (r() * 30 | 0), h = 46 + (r() * 96 | 0), wins = [];
+      for (let wy = VIEW_H - h + 6; wy < VIEW_H - 8; wy += 7) for (let wx = x + 3; wx < x + w - 3; wx += 6) if (r() < 0.28) wins.push([wx, wy, r() < 0.5 ? '#ffd27a' : '#7ad7ff']);
+      b.push({ x, w, h, wins, col: ['#0a0c14', '#0c0e18', '#0e101a'][r() * 3 | 0] });
+      x += w + (r() * 5 | 0);
+    }
+    G._titleSky = b;
+  }
+  for (const b of G._titleSky) {
+    c.fillStyle = b.col; c.fillRect(b.x, VIEW_H - b.h, b.w, b.h);
+    c.fillStyle = '#171b28'; c.fillRect(b.x, VIEW_H - b.h, b.w, 1);
+    for (const w of b.wins) { c.globalAlpha = 0.45 + 0.3 * Math.sin(G.rt * 2 + w[0]); c.fillStyle = w[2]; c.fillRect(w[0], w[1], 2, 2); }
+    c.globalAlpha = 1;
+  }
+  const hz = c.createLinearGradient(0, VIEW_H - 140, 0, VIEW_H);
+  hz.addColorStop(0, 'rgba(7,9,16,0)'); hz.addColorStop(1, 'rgba(7,10,18,0.5)');
+  c.fillStyle = hz; c.fillRect(0, VIEW_H - 140, VIEW_W, 140);
+  // drifting neon embers (additive)
+  if (!G._embers) { G._embers = []; for (let i = 0; i < 24; i++) G._embers.push({ x: Math.random() * VIEW_W, y: Math.random() * VIEW_H, vy: -(5 + Math.random() * 13), vx: (Math.random() - 0.5) * 5, col: NEON[Math.random() * NEON.length | 0] }); }
+  c.globalCompositeOperation = 'lighter';
+  for (const e of G._embers) { e.y += e.vy * 0.016; e.x += e.vx * 0.016; if (e.y < -4) { e.y = VIEW_H + 4; e.x = Math.random() * VIEW_W; } c.globalAlpha = 0.3 + 0.3 * Math.sin(G.rt * 3 + e.x); c.drawImage(SPR.glowS(e.col, 4), e.x - 4, e.y - 4); }
+  c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
   drawRain(c);
-  const gx = Math.random() < 0.07 ? (Math.random() * 6 - 3) | 0 : 0;
-  drawTextC(c, 'NIGHT CITY', VIEW_W / 2 - 3 + gx, 60, '#ff2a6d', 5);
-  drawTextC(c, 'NIGHT CITY', VIEW_W / 2 + 3 + gx, 60, '#05d9e8', 5);
-  drawTextC(c, 'NIGHT CITY', VIEW_W / 2 + gx, 60, '#e8f6ff', 5);
-  drawTextC(c, '— P I X E L   E D I T I O N —', VIEW_W / 2, 96, '#f9f002', 1);
-  drawTextC(c, 'COLLECT IRON · BUY CHROME · OWN THE STREETS', VIEW_W / 2, 112, '#8a93a6', 1);
+
+  // ---- logo with glow ----
+  c.globalCompositeOperation = 'lighter'; c.globalAlpha = 0.5;
+  c.drawImage(SPR.glowS('#ff2a6d', 90), VIEW_W / 2 - 90, 18, 180, 90);
+  c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+  const gx = Math.random() < 0.06 ? (Math.random() * 5 - 2.5) | 0 : 0;
+  drawTextC(c, 'NIGHT CITY', VIEW_W / 2 - 3 + gx, 44, '#ff2a6d', 5);
+  drawTextC(c, 'NIGHT CITY', VIEW_W / 2 + 3 + gx, 44, '#05d9e8', 5);
+  drawTextC(c, 'NIGHT CITY', VIEW_W / 2 + gx, 44, '#f4f8ff', 5);
+  // ornamental divider
+  c.fillStyle = '#3a2a14'; c.fillRect(VIEW_W / 2 - 150, 86, 300, 1);
+  c.fillStyle = '#f9c84a'; c.globalAlpha = 0.7;
+  for (const dx of [-150, 150]) { c.save(); c.translate(VIEW_W / 2 + dx, 86); c.rotate(0.785); c.fillRect(-2, -2, 4, 4); c.restore(); }
+  c.globalAlpha = 1;
+  drawTextC(c, 'I S O M E T R I C   E D I T I O N', VIEW_W / 2, 92, '#f9c84a', 1);
+  drawTextC(c, 'COLLECT IRON · BUY CHROME · OWN THE STREETS', VIEW_W / 2, 106, '#6a7286', 1);
 
   if (G.titleMode === 'gender') { titleGender(c); drawCursorSpr(c); return; }
 
+  // ---- Diablo-style menu plates ----
   const items = [];
   if (hasSave()) items.push('CONTINUE');
   items.push('NEW GAME');
   items.push('SOUND: ' + (SFX.muted ? 'OFF' : 'ON'));
-  const sel = navList(items.length);
+  const sel = navList(items.length), top = 150 + (3 - items.length) * 8;
   for (let i = 0; i < items.length; i++) {
-    const y = 170 + i * 22, hot = uiHot(VIEW_W / 2 - 80, y - 6, 160, 18);
+    const y = top + i * 30, on = sel === i, hot = uiHot(VIEW_W / 2 - 150, y - 6, 300, 22);
     if (hot && G.mouse.moved) G.uiS.sel = i;
-    const on = sel === i;
-    drawTextC(c, (on ? '> ' : '') + items[i] + (on ? ' <' : ''), VIEW_W / 2, y, on ? '#f9f002' : '#8a93a6', on ? 2 : 1);
+    if (on) {
+      const g = c.createLinearGradient(VIEW_W / 2 - 150, 0, VIEW_W / 2 + 150, 0);
+      g.addColorStop(0, 'rgba(249,159,28,0)'); g.addColorStop(0.5, 'rgba(249,159,28,0.20)'); g.addColorStop(1, 'rgba(249,159,28,0)');
+      c.fillStyle = g; c.fillRect(VIEW_W / 2 - 150, y - 4, 300, 19);
+      c.strokeStyle = 'rgba(249,200,74,0.4)'; c.beginPath(); c.moveTo(VIEW_W / 2 - 120, y + 13); c.lineTo(VIEW_W / 2 + 120, y + 13); c.stroke();
+      c.fillStyle = '#f9c84a';
+      for (const dx of [-128, 124]) { c.save(); c.translate(VIEW_W / 2 + dx, y + 5); c.rotate(0.785); c.fillRect(-2.5, -2.5, 5, 5); c.restore(); }
+      drawTextC(c, items[i], VIEW_W / 2, y, '#f9e6b4', 2);
+    } else {
+      drawTextC(c, items[i], VIEW_W / 2, y + 2, '#5a6276', 1);
+    }
     if (hot && G.mouse.click) { G.mouse.click = false; titleSelect(i); return; }
   }
   if (press('Enter') || press('Space')) titleSelect(G.uiS.sel);
 
-  drawTextC(c, 'WASD MOVE · MOUSE SHOOT · SPACE DASH · C HEAL · E INTERACT · V VEHICLE · N RADIO · TAB GEAR', VIEW_W / 2, 300, '#5a6372', 1);
-  drawTextC(c, 'UNOFFICIAL FAN TRIBUTE · ALL PIXELS HANDMADE · NOT AFFILIATED WITH CDPR', VIEW_W / 2, 330, '#3a414e', 1);
+  drawTextC(c, 'WASD MOVE · MOUSE FIRE · SPACE DASH · E INTERACT · V VEHICLE · TAB GEAR', VIEW_W / 2, VIEW_H - 22, '#46506a', 1);
+  drawTextC(c, 'UNOFFICIAL FAN TRIBUTE · NOT AFFILIATED WITH CD PROJEKT RED', VIEW_W / 2, VIEW_H - 11, '#2e3548', 1);
   drawCursorSpr(c);
 }
 
