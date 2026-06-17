@@ -258,7 +258,7 @@ function edgeArrow(c, wx, wy, col) {
 }
 
 function drawMsgs(c) {
-  let y = VIEW_H - 16;
+  let y = VIEW_H - 62; // sit above the health orb + skill row, not over them
   for (let i = G.msgs.length - 1; i >= 0 && i >= G.msgs.length - 5; i--) {
     const m = G.msgs[i], a = Math.min(1, m.t);
     c.globalAlpha = a;
