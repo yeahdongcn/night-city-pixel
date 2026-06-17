@@ -2351,7 +2351,7 @@ function drawCarIso(c, x, y, a, def) {
     const hd = proj(x + fx * 7, y + fy * 7, 5); c.fillStyle = '#ffe9a0'; c.fillRect(hd.x - 1, hd.y - 2, 2, 2);
     return;
   }
-  const hl = def.shape === 'van' ? 17 : 15, hw = 7, lift = 4, H = 7;
+  const hl = def.shape === 'van' ? 12 : 10, hw = 5, lift = 2.5, H = 4.5;
   const cor = [[hl, -hw], [hl, hw], [-hl, hw], [-hl, -hw]];                            // FL FR RR RL
   const P = (u, v, z) => proj(x + fx * u + sxu * v, y + fy * u + syu * v, z);
   const sh = cor.map(([u, v]) => P(u, v, 0)), gb = cor.map(([u, v]) => P(u, v, lift)), t = cor.map(([u, v]) => P(u, v, lift + H));
@@ -2359,14 +2359,14 @@ function drawCarIso(c, x, y, a, def) {
   for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; c.fillStyle = shade(def.col, -32); poly([gb[i], gb[j], t[j], t[i]]); c.fill(); } // raised body sides
   c.fillStyle = def.col; poly(t); c.fill();                                            // roof/top
   c.fillStyle = shade(def.col, 20); poly([t[0], t[1], lp(t[1], t[2], 0.5), lp(t[0], t[3], 0.5)]); c.fill();           // front sheen
-  c.fillStyle = '#0d2530'; poly([lp(t[0], t[3], 0.2), lp(t[1], t[2], 0.2), lp(t[1], t[2], 0.52), lp(t[0], t[3], 0.52)]); c.fill();  // windshield
-  c.strokeStyle = def.col2; c.lineWidth = 1.5; c.beginPath(); c.moveTo(lp(t[0], t[1], 0.5).x, lp(t[0], t[1], 0.5).y); c.lineTo(lp(t[3], t[2], 0.5).x, lp(t[3], t[2], 0.5).y); c.stroke(); c.lineWidth = 1; // stripe
+  c.fillStyle = '#0d2530'; poly([lp(t[0], t[3], 0.22), lp(t[1], t[2], 0.22), lp(t[1], t[2], 0.55), lp(t[0], t[3], 0.55)]); c.fill();  // windshield
+  c.strokeStyle = def.col2; c.lineWidth = 1; c.beginPath(); c.moveTo(lp(t[0], t[1], 0.5).x, lp(t[0], t[1], 0.5).y); c.lineTo(lp(t[3], t[2], 0.5).x, lp(t[3], t[2], 0.5).y); c.stroke(); // stripe
   c.fillStyle = '#ffe9a0'; for (const pp of [t[0], t[1]]) c.fillRect(pp.x - 1, pp.y - 1, 2, 2);  // headlights
   c.fillStyle = '#ff3344'; for (const pp of [t[2], t[3]]) c.fillRect(pp.x - 1, pp.y - 1, 2, 2);  // taillights
   // wheels LAST, at ground level + outset, so they poke out below the raised chassis
-  for (const [u, v] of [[hl - 4, -hw - 1], [hl - 4, hw + 1], [-hl + 4, hw + 1], [-hl + 4, -hw - 1]]) {
-    const w = P(u, v, 1); c.fillStyle = '#0a0a0c'; c.beginPath(); c.ellipse(w.x, w.y, 3.4, 2.6, 0, 0, 7); c.fill();
-    c.fillStyle = '#33333c'; c.beginPath(); c.ellipse(w.x, w.y, 1.4, 1.1, 0, 0, 7); c.fill();
+  for (const [u, v] of [[hl - 3, -hw - 1], [hl - 3, hw + 1], [-hl + 3, hw + 1], [-hl + 3, -hw - 1]]) {
+    const w = P(u, v, 1); c.fillStyle = '#0a0a0c'; c.beginPath(); c.ellipse(w.x, w.y, 2.6, 2, 0, 0, 7); c.fill();
+    c.fillStyle = '#33333c'; c.beginPath(); c.ellipse(w.x, w.y, 1.1, 0.9, 0, 0, 7); c.fill();
   }
 }
 
