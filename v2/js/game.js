@@ -410,9 +410,14 @@ function boot() {
     if (jj) { G.p.x = jj.x + 14; G.p.y = jj.y + 12; }
     for (let i = 0; i < 90; i++) step(1 / 60);
     G.bannerO = null;
-  } else if (/edge/.test(q)) { // screenshot helper: city's water border
+  } else if (/edge/.test(q)) { // screenshot helper: city's water border (W/S coast)
     startGame(false);
     G.p.x = 9 * TILE; G.p.y = 30 * TILE;
+    for (let i = 0; i < 60; i++) step(1 / 60);
+    G.bannerO = null;
+  } else if (/mtn/.test(q)) { // screenshot helper: badlands mountains (N/E border)
+    startGame(false);
+    G.p.x = 40 * TILE; G.p.y = 12 * TILE;
     for (let i = 0; i < 60; i++) step(1 / 60);
     G.bannerO = null;
   }
@@ -2183,11 +2188,19 @@ function isoRoofAlphaAt(tx, ty) {
   for (const r of WORLD.roofs) { if (tx >= r.tx0 && tx <= r.tx1 && ty >= r.ty0 && ty <= r.ty1 && r.a < a) a = r.a; }
   return a;
 }
-// outer frame (beyond the road grid) — rendered as the bay's water, not building blocks
+// outer frame (beyond the road grid): water on the W/S coast, badlands mountains on the N/E
 function isBorderTile(tx, ty) { return tx < 6 || ty < 6 || tx > 117 || ty > 117; }
+function borderKind(tx, ty) { return (tx < 6 || ty > 117) ? 'water' : 'mountain'; }
 function isoWaterTile(c, tx, ty) {
   const sh = Math.sin(G.rt * 1.2 + (tx - ty) * 0.55 + ty * 0.15);
   isoGroundTile(c, tx, ty, sh > 0.6 ? '#16343f' : sh > -0.1 ? '#0e2530' : '#091a22');
+}
+const MTN_PAL = { top: '#2e2a20', lt: '#231f17', dk: '#15120c' };
+const MTN_CAP = { top: '#46402e', lt: '#231f17', dk: '#15120c' };
+function isoMtnHeight(tx, ty) {
+  const n = Math.sin(tx * 0.7) * Math.cos(ty * 0.6) + Math.sin((tx + ty) * 0.35); // -2..2 rolling
+  const edge = Math.max(0, 5 - Math.min(tx, ty, WORLD.W - 1 - tx, WORLD.H - 1 - ty)); // taller toward the map edge
+  return 42 + edge * 9 + (n + 2) * 15; // ≈42..120 px
 }
 function isoSprite(c, spr, x, y, ax, ay, shadow) {
   const s = proj(x, y, 0);
@@ -2216,7 +2229,7 @@ function render() {
   const doors = [];
   for (let ty = minTY; ty <= maxTY; ty++) for (let tx = minTX; tx <= maxTX; tx++) {
     const v = T[ty * W + tx];
-    if (v === WT.BLDG) { if (isBorderTile(tx, ty)) isoWaterTile(c, tx, ty); continue; }
+    if (v === WT.BLDG) { if (isBorderTile(tx, ty) && borderKind(tx, ty) === 'water') isoWaterTile(c, tx, ty); continue; }
     if (v === WT.DOOR) { isoGroundTile(c, tx, ty, '#4a3414'); doors.push([tx, ty]); }
     else isoGroundTile(c, tx, ty, GCOL[v] || '#16161e');
   }
@@ -2225,7 +2238,11 @@ function render() {
 
   // depth-sorted tall things
   const D = [];
-  for (let ty = minTY; ty <= maxTY; ty++) for (let tx = minTX; tx <= maxTX; tx++) if (T[ty * W + tx] === WT.BLDG && !isBorderTile(tx, ty)) D.push({ d: (tx + ty + 1) * TILE, k: 'wall', tx, ty });
+  for (let ty = minTY; ty <= maxTY; ty++) for (let tx = minTX; tx <= maxTX; tx++) {
+    if (T[ty * W + tx] !== WT.BLDG) continue;
+    if (!isBorderTile(tx, ty)) D.push({ d: (tx + ty + 1) * TILE, k: 'wall', tx, ty });
+    else if (borderKind(tx, ty) === 'mountain') D.push({ d: (tx + ty + 1) * TILE, k: 'mtn', tx, ty });
+  }
   const push = (x, y, k, o) => { if (isoVisible(x, y, 90)) D.push({ d: x + y, k, o }); };
   for (const cr of G.crates) if (cr.hp > 0 && !crateHidden(cr)) push(cr.x, cr.y, 'crate', cr);
   for (const vn of WORLD.vends) push(vn.x, vn.y, 'vend', vn);
@@ -2325,6 +2342,12 @@ function drawIsoThing(c, it, p) {
     if (a > 0.5 && occludesActor(it.tx, it.ty, ht)) a = 0.3;            // fade buildings covering V or enemies
     isoBlock(c, it.tx, it.ty, ht, isoWallPal(it.tx, it.ty), a);
     if (a > 0.55) isoWindows(c, it.tx, it.ty, ht, a);
+    return;
+  }
+  if (it.k === 'mtn') {
+    const ht = isoMtnHeight(it.tx, it.ty);
+    const a = occludesActor(it.tx, it.ty, ht) ? 0.3 : 1;
+    isoBlock(c, it.tx, it.ty, ht, ht > 96 ? MTN_CAP : MTN_PAL, a);     // snowy/rock cap on the tallest peaks
     return;
   }
   const o = it.o;
