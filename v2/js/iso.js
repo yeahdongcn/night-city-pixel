@@ -1,106 +1,81 @@
 'use strict';
-// ============ Isometric projection + procedural sprites ============
-// World coords are in TILE UNITS (floats). The sim is a flat plane; we project to 2:1 iso.
+// ============ Isometric projection layer (v2) ============
+// v1's sim is a flat world-pixel plane (TILE=16). We keep ALL of it and only change how
+// world (x,y) maps to the screen: 2:1 dimetric. cam = world-space point the camera centers.
+const ISO_ZK = 0.92;   // screen px risen per world-px of height
 
-const HW = 16, HH = 8;        // half tile footprint on screen (tile diamond = 32 x 16)
-const ZK = 11;                // px a wall rises per 1.0 height unit
-
-function isoX(wx, wy) { return (wx - wy) * HW; }
-function isoY(wx, wy, wz) { return (wx + wy) * HH - (wz || 0) * ZK; }
-function depthOf(wx, wy) { return wx + wy; }          // back-to-front sort key
-// invert ground projection (wz=0): screen-rel → world tile
-function screenToWorld(sx, sy) {
-  return { x: (sx / HW + sy / HH) / 2, y: (sy / HH - sx / HW) / 2 };
+// frame screen offset (set each frame in step/render). _ox/_oy stable (mouse), _shx/_shy add shake (draw)
+function isoSetOffsets() {
+  G._ox = -(G.cam.x - G.cam.y) + VIEW_W / 2;
+  G._oy = -((G.cam.x + G.cam.y) * 0.5) + VIEW_H / 2;
+}
+function proj(wx, wy, wz) {
+  return { x: (wx - wy) + G._ox + (G._shx || 0), y: (wx + wy) * 0.5 - (wz || 0) * ISO_ZK + G._oy + (G._shy || 0) };
+}
+// screen → world ground point (wz=0). uses the shake-free offsets.
+function invProj(sx, sy) {
+  const rx = sx - G._ox, ry = sy - G._oy;
+  return { x: rx / 2 + ry, y: ry - rx / 2 };
+}
+function isoDepth(x, y) { return x + y; }
+function isoVisible(x, y, m) {
+  const s = proj(x, y, 0); m = m || 60;
+  return s.x > -m && s.x < VIEW_W + m && s.y > -m && s.y < VIEW_H + m + 40;
 }
 
-function shade(hex, amt) {
-  const n = parseInt(hex.slice(1), 16);
-  let r = (n >> 16) + amt, g = ((n >> 8) & 255) + amt, b = (n & 255) + amt;
-  r = Math.max(0, Math.min(255, r)); g = Math.max(0, Math.min(255, g)); b = Math.max(0, Math.min(255, b));
-  return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+// ---- building height + wall colour per BLDG tile (stable hash; const within a footprint) ----
+const _WALL_PALS = [
+  { top: '#2c2c38', lt: '#23232e', dk: '#15151c' },
+  { top: '#302a3a', lt: '#26222e', dk: '#17131e' },
+  { top: '#283038', lt: '#20262e', dk: '#141a20' },
+  { top: '#322c34', lt: '#28232a', dk: '#181420' },
+];
+function isoTileHeight(tx, ty) {
+  // coarse region (≈ building footprint) → consistent flat-roof height 2.4..4.8 tiles
+  const h = (((tx / 5) | 0) * 73856 ^ ((ty / 5) | 0) * 19349) >>> 0;
+  if (tx <= 1 || ty <= 1 || tx >= WORLD.W - 2 || ty >= WORLD.H - 2) return 70; // border ring tall
+  return (38 + (h % 5) * 12); // px
 }
-function mkCanvas(w, h) { const c = document.createElement('canvas'); c.width = Math.max(1, w | 0); c.height = Math.max(1, h | 0); return c; }
-
-function gridToCanvas(rows, pal) {
-  const cv = mkCanvas(rows[0].length, rows.length), c = cv.getContext('2d');
-  for (let y = 0; y < rows.length; y++) for (let x = 0; x < rows[y].length; x++) {
-    const k = rows[y][x]; if (k !== '.' && pal[k]) { c.fillStyle = pal[k]; c.fillRect(x, y, 1, 1); }
-  }
-  return cv;
-}
-
-// ---- upright billboard humanoid (8x14) used for all actors, drawn flat facing camera ----
-const BODY = {
-  front: ['..HHHH..', '.HHHHHH.', '.HSSSSH.', '.SESSES.', '..SSSS..', '.JJJJJJ.', '.JTJJTJ.', 'SJJJJJJS', '.JJJJJJ.', '.JJJJJJ.', '.PP..PP.', '.PP..PP.', '.BB..BB.', '.BB..BB.'],
-  back:  ['..HHHH..', '.HHHHHH.', '.HHHHHH.', '.HHHHHH.', '..HHHH..', '.JJJJJJ.', '.JJTTJJ.', 'SJJJJJJS', '.JJJJJJ.', '.JJJJJJ.', '.PP..PP.', '.PP..PP.', '.BB..BB.', '.BB..BB.'],
-  side:  ['..HHHH..', '.HHHHHH.', '.SSHHHH.', '.ESHHHH.', '..SSHH..', '.JJJJJ..', '.TJJJJ..', '.SJJJJ..', '.JJJJJ..', '.JJJJJ..', '.PPP....', '.PP.....', '.BB.....', '.BB.....'],
-};
-function makeActor(pal) {
-  const p = Object.assign({ H:'#222', S:'#e8b88a', E:'#05d9e8', J:'#333', T:'#888', P:'#23232c', B:'#101014' }, pal);
-  return { front: gridToCanvas(BODY.front, p), back: gridToCanvas(BODY.back, p), side: gridToCanvas(BODY.side, p) };
-}
-// pick facing canvas + flip from a world-space velocity angle (already iso-rotated feel)
-function actorFacing(ax, ang) {
-  // ang in screen space (atan2 of projected dir). 8-way → front/back/side
-  const a = ((ang % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-  if (a > 0.9 && a < 2.24) return { cv: ax.front, flip: false };
-  if (a > 4.05 && a < 5.38) return { cv: ax.back, flip: false };
-  const right = a < Math.PI / 2 || a > 3 * Math.PI / 2;
-  return { cv: ax.side, flip: !right };
+function isoWallPal(tx, ty) {
+  const k = (((tx / 5) | 0) * 31 + ((ty / 5) | 0) * 17) & 3;
+  return _WALL_PALS[k];
 }
 
-// ---- iso ground-tile diamond sprite (32x16) ----
-function tileSprite(col, edge) {
-  const cv = mkCanvas(32, 18), c = cv.getContext('2d');
+// ---- iso ground diamond (filled, by the 4 tile corners) ----
+function isoGroundTile(c, tx, ty, col, edge) {
+  const x0 = tx * TILE, y0 = ty * TILE, x1 = x0 + TILE, y1 = y0 + TILE;
+  const n = proj(x0, y0, 0), e = proj(x1, y0, 0), s = proj(x1, y1, 0), w = proj(x0, y1, 0);
   c.fillStyle = col;
-  c.beginPath(); c.moveTo(16, 0); c.lineTo(32, 8); c.lineTo(16, 16); c.lineTo(0, 8); c.closePath(); c.fill();
+  c.beginPath(); c.moveTo(n.x, n.y); c.lineTo(e.x, e.y); c.lineTo(s.x, s.y); c.lineTo(w.x, w.y); c.closePath(); c.fill();
   if (edge) { c.strokeStyle = edge; c.lineWidth = 1; c.stroke(); }
-  // subtle top sheen
-  c.fillStyle = shade(col, 8);
-  c.beginPath(); c.moveTo(16, 1); c.lineTo(30, 8); c.lineTo(16, 4); c.closePath(); c.fill();
-  return cv;
 }
 
-// ---- glow sprite (additive) ----
-const _glows = {};
-function glow(col, r) {
-  const k = col + r;
-  if (!_glows[k]) {
-    const cv = mkCanvas(r * 2, r * 2), c = cv.getContext('2d');
-    const g = c.createRadialGradient(r, r, 1, r, r, r);
-    g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)');
-    c.fillStyle = g; c.fillRect(0, 0, r * 2, r * 2);
-    _glows[k] = cv;
-  }
-  return _glows[k];
+// ---- iso wall/building block (top diamond + SW + SE faces), alpha for interior reveal ----
+function isoBlock(c, tx, ty, htPx, pal, alpha) {
+  const x0 = tx * TILE, y0 = ty * TILE, x1 = x0 + TILE, y1 = y0 + TILE, zh = htPx * ISO_ZK;
+  const gN = proj(x0, y0, 0), gE = proj(x1, y0, 0), gS = proj(x1, y1, 0), gW = proj(x0, y1, 0);
+  if (alpha != null && alpha < 1) c.globalAlpha = alpha;
+  // SW face (W–S), darker
+  c.fillStyle = pal.dk;
+  c.beginPath(); c.moveTo(gW.x, gW.y); c.lineTo(gS.x, gS.y); c.lineTo(gS.x, gS.y - zh); c.lineTo(gW.x, gW.y - zh); c.closePath(); c.fill();
+  // SE face (E–S), mid
+  c.fillStyle = pal.lt;
+  c.beginPath(); c.moveTo(gE.x, gE.y); c.lineTo(gS.x, gS.y); c.lineTo(gS.x, gS.y - zh); c.lineTo(gE.x, gE.y - zh); c.closePath(); c.fill();
+  // top diamond, lit
+  c.fillStyle = pal.top;
+  c.beginPath(); c.moveTo(gN.x, gN.y - zh); c.lineTo(gE.x, gE.y - zh); c.lineTo(gS.x, gS.y - zh); c.lineTo(gW.x, gW.y - zh); c.closePath(); c.fill();
+  // edge highlight on top
+  c.strokeStyle = shade(pal.top, 14); c.lineWidth = 1; c.stroke();
+  c.globalAlpha = 1; c.lineWidth = 1;
 }
 
-// ---- draw an iso wall/building block at tile (i,j) of height h, palette ----
-// faces: top diamond (lit), left wall (mid), right wall (dark). drawn at screen (sx,sy)=top-of-tile-ground.
-function drawIsoBlock(c, sx, sy, h, top, lt, dk) {
-  const zh = h * ZK;
-  // left wall (facing down-left)
-  c.fillStyle = dk;
-  c.beginPath(); c.moveTo(sx - HW, sy + HH); c.lineTo(sx, sy + HH * 2); c.lineTo(sx, sy + HH * 2 - zh); c.lineTo(sx - HW, sy + HH - zh); c.closePath(); c.fill();
-  // right wall (facing down-right)
-  c.fillStyle = lt;
-  c.beginPath(); c.moveTo(sx + HW, sy + HH); c.lineTo(sx, sy + HH * 2); c.lineTo(sx, sy + HH * 2 - zh); c.lineTo(sx + HW, sy + HH - zh); c.closePath(); c.fill();
-  // top diamond
-  c.fillStyle = top;
-  c.beginPath(); c.moveTo(sx, sy - zh); c.lineTo(sx + HW, sy + HH - zh); c.lineTo(sx, sy + HH * 2 - zh); c.lineTo(sx - HW, sy + HH - zh); c.closePath(); c.fill();
-}
-
-// lit windows on a wall face (cheap detail), drawn after the block
-function drawWindows(c, sx, sy, h, rng) {
-  for (let row = 0; row < h; row++) {
-    const wy = sy + HH * 2 - (row + 1) * ZK + 2;
-    for (let k = -1; k <= 0; k++) {
-      if (rng() < 0.45) { c.fillStyle = rng() < 0.5 ? '#ffd27a' : '#7ad7ff'; c.fillRect(sx + 3 + k * 7, wy + (sx & 1), 3, 3); }
-      if (rng() < 0.45) { c.fillStyle = rng() < 0.5 ? '#ffd27a' : '#7ad7ff'; c.fillRect(sx - 9 + k * 7 + 6, wy + 1, 3, 3); }
-    }
-  }
-}
-
-function mulberry32(a) {
-  return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+// ---- billboard sprite (actor/prop), feet at world (x,y) ----
+function isoBill(c, spr, x, y, alpha, scale, flip, shadow) {
+  const s = proj(x, y, 0); scale = scale || 1;
+  if (shadow !== false) { c.fillStyle = 'rgba(0,0,0,0.32)'; c.beginPath(); c.ellipse(s.x, s.y, 4 * scale, 2 * scale, 0, 0, 7); c.fill(); }
+  c.save(); if (alpha != null) c.globalAlpha = alpha;
+  c.translate(s.x, s.y);
+  if (flip) c.scale(-scale, scale); else c.scale(scale, scale);
+  c.drawImage(spr, -4, -14);
+  c.restore(); c.globalAlpha = 1;
 }
