@@ -2367,13 +2367,14 @@ function drawIsoHolo(c, h) {
 // per-shape iso silhouettes so a van / pickup / sport read differently (matches the garage variety)
 // Two boxes: a full chassis (bottom) + a smaller cabin (top). cf/cr = cabin rear/front
 // extent as a fraction of hl; ch = chassis height, cab = cabin height.
+// heights (ch chassis, cab cabin) are deliberately tall so the two-box stacking reads at world scale
 const CAR_SHAPE = {
-  sedan:  { hl: 11,   hw: 5.2, ch: 4.4, cf: -0.40, cr: 0.18, cab: 3.3 },
-  van:    { hl: 13,   hw: 5.6, ch: 4.8, cf: -0.62, cr: 0.50, cab: 4.6 },
-  pickup: { hl: 12.5, hw: 5.2, ch: 4.4, cf:  0.02, cr: 0.50, cab: 3.3, bed: 1 },
-  muscle: { hl: 12,   hw: 5.6, ch: 3.8, cf: -0.40, cr: 0.10, cab: 2.8, st: 1 },
-  sport:  { hl: 12,   hw: 4.8, ch: 3.5, cf: -0.44, cr: -0.02, cab: 2.5, st: 1 },
-  hyper:  { hl: 12.5, hw: 4.6, ch: 3.2, cf: -0.40, cr: -0.08, cab: 2.3, st: 1, wedge: 1 },
+  sedan:  { hl: 11,   hw: 5.2, ch: 6.5, cf: -0.40, cr: 0.18, cab: 5.5 },
+  van:    { hl: 13,   hw: 5.6, ch: 7.0, cf: -0.62, cr: 0.50, cab: 7.5 },
+  pickup: { hl: 12.5, hw: 5.2, ch: 6.5, cf:  0.02, cr: 0.50, cab: 5.5, bed: 1 },
+  muscle: { hl: 12,   hw: 5.6, ch: 5.8, cf: -0.40, cr: 0.10, cab: 4.6, st: 1 },
+  sport:  { hl: 12,   hw: 4.8, ch: 5.2, cf: -0.44, cr: -0.02, cab: 4.0, st: 1 },
+  hyper:  { hl: 12.5, hw: 4.6, ch: 4.8, cf: -0.40, cr: -0.08, cab: 3.6, st: 1, wedge: 1 },
 };
 function drawCarIso(c, x, y, a, def, pf) {
   pf = pf || proj;
@@ -2384,8 +2385,8 @@ function drawCarIso(c, x, y, a, def, pf) {
   const depthOf = (u, v) => (x + fx * u + sxu * v) + (y + fy * u + syu * v);            // world wx+wy
   const s0 = P(0, 0, 0), sF = P(1, 0, 0), fwdAng = Math.atan2(sF.y - s0.y, sF.x - s0.x); // car's forward, in screen space
   const wheel = (u, v) => {                                                            // tire oriented along driving dir
-    const w = P(u, v, 1.1); c.fillStyle = '#0a0a0d'; c.beginPath(); c.ellipse(w.x, w.y, 3, 1.6, fwdAng, 0, 7); c.fill();
-    c.fillStyle = '#26262e'; c.beginPath(); c.ellipse(w.x, w.y, 1.2, 0.7, fwdAng, 0, 7); c.fill();
+    const w = P(u, v, 1.1); c.fillStyle = '#08080b'; c.beginPath(); c.ellipse(w.x, w.y, 3.2, 1.9, fwdAng, 0, 7); c.fill();
+    c.fillStyle = '#2c2c34'; c.beginPath(); c.ellipse(w.x, w.y, 1.3, 0.8, fwdAng, 0, 7); c.fill();
   };
   if (def.bike) {
     const wF = P(6.5, 0, 0), wR = P(-6.5, 0, 0);
@@ -2401,7 +2402,7 @@ function drawCarIso(c, x, y, a, def, pf) {
     return;
   }
   const S = CAR_SHAPE[def.shape] || CAR_SHAPE.sedan;
-  const hl = S.hl, hw = S.hw, z0 = 2, z1 = S.ch, cF = hl * S.cf, cR = hl * S.cr, cz = z1 + S.cab, cw = hw * 0.6;
+  const hl = S.hl, hw = S.hw, z0 = 1.4, z1 = S.ch, cF = hl * S.cf, cR = hl * S.cr, cz = z1 + S.cab, cw = hw * 0.6;
   const box = (x0, x1, y0, y1, za, zb, top, side) => {
     const cs = [[x1, y0], [x1, y1], [x0, y1], [x0, y0]];                               // FL FR RR RL (x=forward)
     const w = cs.map(([u, v]) => depthOf(u, v));
@@ -2426,8 +2427,8 @@ function drawCarIso(c, x, y, a, def, pf) {
   for (const f of gf) { c.fillStyle = gCol[f.i]; poly([cab.b[f.i], cab.b[f.j], cab.t[f.j], cab.t[f.i]]); c.fill(); }
   if (S.st) { c.strokeStyle = def.col2; c.lineWidth = 1; for (const yo of [-1.4, 1.4]) { const a1 = P(cR, yo, z1 + 0.05), a2 = P(hl - 1, yo, z1 + 0.05); c.beginPath(); c.moveTo(a1.x, a1.y); c.lineTo(a2.x, a2.y); c.stroke(); } } // hood stripes
   const toward = fx + fy;                                                              // >0 ⇒ nose faces camera
-  if (toward > -0.3) { c.fillStyle = '#ffe9a0'; for (const v of [-hw + 1.6, hw - 1.6]) { const p = P(hl, v, S.wedge ? 1.8 : 3); c.fillRect(p.x - 1, p.y - 1, 2, 2); } }
-  if (toward < 0.3) { c.fillStyle = '#ff3344'; for (const v of [-hw + 1.6, hw - 1.6]) { const p = P(-hl, v, 3); c.fillRect(p.x - 1, p.y - 1, 2, 2); } }
+  if (toward > -0.3) { c.fillStyle = '#ffe9a0'; for (const v of [-hw + 1.6, hw - 1.6]) { const p = P(hl, v, S.wedge ? 2.4 : 4); c.fillRect(p.x - 1, p.y - 1, 2, 2); } }
+  if (toward < 0.3) { c.fillStyle = '#ff3344'; for (const v of [-hw + 1.6, hw - 1.6]) { const p = P(-hl, v, 4); c.fillRect(p.x - 1, p.y - 1, 2, 2); } }
 }
 
 function drawIsoThing(c, it, p) {
