@@ -2413,14 +2413,13 @@ function drawCarIso(c, x, y, a, def, pf) {
     return { b, t: tp, w };
   };
   c.fillStyle = 'rgba(0,0,0,0.3)'; poly([P(hl, -hw, 0), P(hl, hw, 0), P(-hl, hw, 0), P(-hl, -hw, 0)]); c.fill();  // shadow
-  // wheels at the axles, split by depth: far pair behind the body, near pair in front
-  const ws = hw + 0.2, wp = [[hl * 0.6, -ws], [hl * 0.6, ws], [-hl * 0.6, ws], [-hl * 0.6, -ws]].map(([u, v]) => ({ u, v, d: depthOf(u, v) })).sort((p, q) => p.d - q.d);
-  wheel(wp[0].u, wp[0].v); wheel(wp[1].u, wp[1].v);                                     // far wheels
+  // wheels at the axles; only the camera-near ones are drawn — the body hides the far pair
+  const ws = hw + 0.3, wp = [[hl * 0.6, -ws], [hl * 0.6, ws], [-hl * 0.6, ws], [-hl * 0.6, -ws]].map(([u, v]) => ({ u, v, d: depthOf(u, v) })).sort((p, q) => p.d - q.d);
   if (S.wedge) { c.fillStyle = shade(def.col, -12); poly([P(hl, -hw, 1.4), P(hl, hw, 1.4), P(hl * 0.45, hw, z1), P(hl * 0.45, -hw, z1)]); c.fill(); } // wedge nose
   const ch = box(-hl, hl * (S.wedge ? 0.45 : 1), -hw, hw, z0, z1, def.col, shade(def.col, -32)); // BOTTOM box
   c.fillStyle = shade(def.col, 14); poly([ch.t[0], ch.t[1], lp(ch.t[1], ch.t[2], 0.5), lp(ch.t[0], ch.t[3], 0.5)]); c.fill(); // hood sheen
   if (S.bed) { c.fillStyle = '#15151b'; poly([P(-hl + 1, -hw + 1, z1 + 0.1), P(cF, -hw + 1, z1 + 0.1), P(cF, hw - 1, z1 + 0.1), P(-hl + 1, hw - 1, z1 + 0.1)]); c.fill(); } // pickup bed
-  wheel(wp[2].u, wp[2].v); wheel(wp[3].u, wp[3].v);                                     // near wheels (in front of body)
+  wheel(wp[2].u, wp[2].v); wheel(wp[3].u, wp[3].v);                                     // the two near wheels, in front of the body
   const cab = box(cF, cR, -cw, cw, z1, cz, shade(def.col, -6), shade(def.col, -42));   // TOP box (smaller)
   const gCol = ['#13313b', '#0e2836', '#0c2230', '#0e2836'];                            // front / right / rear / left glass
   const gf = [0, 1, 2, 3].map(i => ({ i, j: (i + 1) % 4 })).sort((p, q) => (cab.w[p.i] + cab.w[p.j]) - (cab.w[q.i] + cab.w[q.j]));
