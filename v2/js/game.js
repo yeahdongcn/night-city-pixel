@@ -2365,13 +2365,15 @@ function drawIsoHolo(c, h) {
 
 // proper 2.5D car: raised body box, four wheels at the corners, windshield, stripe, lights
 // per-shape iso silhouettes so a van / pickup / sport read differently (matches the garage variety)
+// Two boxes: a full chassis (bottom) + a smaller cabin (top). cf/cr = cabin rear/front
+// extent as a fraction of hl; ch = chassis height, cab = cabin height.
 const CAR_SHAPE = {
-  sedan:  { hl: 11.5, hw: 5.5, ch: 4.4, cf: -0.55, cr: 0.30, cz: 7.4 },
-  van:    { hl: 14,   hw: 6,   ch: 5.2, cf: -0.74, cr: 0.66, cz: 9.2 },
-  pickup: { hl: 13,   hw: 5.5, ch: 4.4, cf: -0.10, cr: 0.52, cz: 7.6, bed: 1 },
-  muscle: { hl: 12.5, hw: 6,   ch: 4.0, cf: -0.50, cr: 0.22, cz: 6.6, st: 1 },
-  sport:  { hl: 12,   hw: 5,   ch: 3.7, cf: -0.50, cr: 0.10, cz: 6.2, st: 1 },
-  hyper:  { hl: 12.5, hw: 4.7, ch: 3.4, cf: -0.46, cr: 0.00, cz: 6.0, st: 1, wedge: 1 },
+  sedan:  { hl: 11,   hw: 5.2, ch: 4.4, cf: -0.40, cr: 0.18, cab: 3.3 },
+  van:    { hl: 13,   hw: 5.6, ch: 4.8, cf: -0.62, cr: 0.50, cab: 4.6 },
+  pickup: { hl: 12.5, hw: 5.2, ch: 4.4, cf:  0.02, cr: 0.50, cab: 3.3, bed: 1 },
+  muscle: { hl: 12,   hw: 5.6, ch: 3.8, cf: -0.40, cr: 0.10, cab: 2.8, st: 1 },
+  sport:  { hl: 12,   hw: 4.8, ch: 3.5, cf: -0.44, cr: -0.02, cab: 2.5, st: 1 },
+  hyper:  { hl: 12.5, hw: 4.6, ch: 3.2, cf: -0.40, cr: -0.08, cab: 2.3, st: 1, wedge: 1 },
 };
 function drawCarIso(c, x, y, a, def, pf) {
   pf = pf || proj;
@@ -2379,49 +2381,51 @@ function drawCarIso(c, x, y, a, def, pf) {
   const poly = pts => { c.beginPath(); c.moveTo(pts[0].x, pts[0].y); for (let i = 1; i < pts.length; i++) c.lineTo(pts[i].x, pts[i].y); c.closePath(); };
   const lp = (u, v, f) => ({ x: u.x + (v.x - u.x) * f, y: u.y + (v.y - u.y) * f });
   const P = (u, v, z) => pf(x + fx * u + sxu * v, y + fy * u + syu * v, z);
+  const depthOf = (u, v) => (x + fx * u + sxu * v) + (y + fy * u + syu * v);            // world wx+wy
+  const s0 = P(0, 0, 0), sF = P(1, 0, 0), fwdAng = Math.atan2(sF.y - s0.y, sF.x - s0.x); // car's forward, in screen space
+  const wheel = (u, v) => {                                                            // tire oriented along driving dir
+    const w = P(u, v, 1.1); c.fillStyle = '#0a0a0d'; c.beginPath(); c.ellipse(w.x, w.y, 3, 1.6, fwdAng, 0, 7); c.fill();
+    c.fillStyle = '#26262e'; c.beginPath(); c.ellipse(w.x, w.y, 1.2, 0.7, fwdAng, 0, 7); c.fill();
+  };
   if (def.bike) {
-    const wF = P(7, 0, 0), wR = P(-7, 0, 0);
-    c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); c.ellipse((wF.x + wR.x) / 2, (wF.y + wR.y) / 2, 9, 4, 0, 0, 7); c.fill();
-    c.fillStyle = '#0a0a0c'; for (const pp of [wF, wR]) { c.beginPath(); c.ellipse(pp.x, pp.y, 3, 2.4, 0, 0, 7); c.fill(); }
-    const bFg = P(5, 0, 0), bRg = P(-5, 0, 0), bF = P(5, 0, 6), bR = P(-5, 0, 6);
-    c.fillStyle = shade(def.col, -26); poly([bFg, bRg, bR, bF]); c.fill();
+    const wF = P(6.5, 0, 0), wR = P(-6.5, 0, 0);
+    c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); c.ellipse((wF.x + wR.x) / 2, (wF.y + wR.y) / 2, 8, 3.5, fwdAng, 0, 7); c.fill();
+    const back = depthOf(6.5, 0) < depthOf(-6.5, 0);
+    wheel(back ? 6.5 : -6.5, 0);                                                        // far wheel first
+    const bFg = P(4.5, 0, 0), bRg = P(-4.5, 0, 0), bF = P(4.5, 0, 6), bR = P(-4.5, 0, 6);
+    c.fillStyle = shade(def.col, -22); poly([bFg, bRg, bR, bF]); c.fill();
     c.strokeStyle = def.col; c.lineWidth = 3; c.beginPath(); c.moveTo(bF.x, bF.y); c.lineTo(bR.x, bR.y); c.stroke(); c.lineWidth = 1;
     c.fillStyle = def.col2; c.fillRect((bF.x + bR.x) / 2 - 1, (bF.y + bR.y) / 2 - 1, 2, 2);
-    const hd = P(7, 0, 5); c.fillStyle = '#ffe9a0'; c.fillRect(hd.x - 1, hd.y - 2, 2, 2);
+    wheel(back ? -6.5 : 6.5, 0);                                                        // near wheel last
+    if (fx + fy > -0.3) { const hd = P(6.5, 0, 4); c.fillStyle = '#ffe9a0'; c.fillRect(hd.x - 1, hd.y - 1, 2, 2); }
     return;
   }
   const S = CAR_SHAPE[def.shape] || CAR_SHAPE.sedan;
-  const hl = S.hl, hw = S.hw, z1 = S.ch, cF = hl * S.cf, cR = hl * S.cr, cz = S.cz;
+  const hl = S.hl, hw = S.hw, z0 = 2, z1 = S.ch, cF = hl * S.cf, cR = hl * S.cr, cz = z1 + S.cab, cw = hw * 0.6;
   const box = (x0, x1, y0, y1, za, zb, top, side) => {
     const cs = [[x1, y0], [x1, y1], [x0, y1], [x0, y0]];                               // FL FR RR RL (x=forward)
-    const w = cs.map(([u, v]) => (x + fx * u + sxu * v) + (y + fy * u + syu * v));     // per-corner depth (wx+wy)
+    const w = cs.map(([u, v]) => depthOf(u, v));
     const b = cs.map(([u, v]) => P(u, v, za)), tp = cs.map(([u, v]) => P(u, v, zb));
     const faces = [0, 1, 2, 3].map(i => ({ i, j: (i + 1) % 4 })).sort((p, q) => (w[p.i] + w[p.j]) - (w[q.i] + w[q.j]));
     for (const f of faces) { c.fillStyle = side; poly([b[f.i], b[f.j], tp[f.j], tp[f.i]]); c.fill(); } // far → near
     c.fillStyle = top; poly(tp); c.fill();
     return { b, t: tp, w };
   };
-  c.fillStyle = 'rgba(0,0,0,0.32)'; poly([P(hl, -hw, 0), P(hl, hw, 0), P(-hl, hw, 0), P(-hl, -hw, 0)]); c.fill();  // shadow
-  // wedge nose for hypercars: a low sloped front section
-  if (S.wedge) { c.fillStyle = shade(def.col, -10); poly([P(hl, -hw, 1.6), P(hl, hw, 1.6), P(hl * 0.4, hw, z1), P(hl * 0.4, -hw, z1)]); c.fill(); }
-  const ch = box(-hl, hl * (S.wedge ? 0.4 : 1), -hw, hw, 2, z1, def.col, shade(def.col, -34)); // chassis slab
-  c.fillStyle = shade(def.col, 16); poly([ch.t[0], ch.t[1], lp(ch.t[1], ch.t[2], 0.45), lp(ch.t[0], ch.t[3], 0.45)]); c.fill(); // hood sheen
-  // wheels — after the chassis so they show below the fenders
-  for (const [u, v] of [[hl - 3, -hw], [hl - 3, hw], [-hl + 3, -hw], [-hl + 3, hw]]) {
-    const w = P(u, v, 0.9); c.fillStyle = '#0c0c10'; c.beginPath(); c.ellipse(w.x, w.y, 2.6, 2.1, 0, 0, 7); c.fill();
-    c.fillStyle = '#2a2a32'; c.beginPath(); c.ellipse(w.x, w.y - 0.5, 1.4, 1, 0, 0, 7); c.fill();
-  }
-  // pickup: open cargo bed behind the cabin
-  if (S.bed) { c.fillStyle = '#16161c'; poly([P(-hl + 1, -hw + 1, z1 + 0.1), P(cF, -hw + 1, z1 + 0.1), P(cF, hw - 1, z1 + 0.1), P(-hl + 1, hw - 1, z1 + 0.1)]); c.fill(); }
-  const cab = box(cF, cR, -hw * 0.72, hw * 0.72, z1, cz, shade(def.col, -2), shade(def.col, -40)); // raised cabin
-  // glass on the cabin faces, drawn near-last so far windows never show through
-  const gCol = ['#12303a', '#0e2836', '#0c2230', '#0e2836'];                            // front / right / rear / left
-  const gFaces = [0, 1, 2, 3].map(i => ({ i, j: (i + 1) % 4 })).sort((p, q) => (cab.w[p.i] + cab.w[p.j]) - (cab.w[q.i] + cab.w[q.j]));
-  for (const f of gFaces) { c.fillStyle = gCol[f.i]; poly([cab.b[f.i], cab.b[f.j], cab.t[f.j], cab.t[f.i]]); c.fill(); }
-  // sporty shapes: twin hood racing stripes (only these, not every car)
-  if (S.st) { c.strokeStyle = def.col2; c.lineWidth = 1; for (const yo of [-1.4, 1.4]) { const a1 = P(cR, yo, z1 + 0.05), a2 = P(hl - 1, yo, z1 + 0.05); c.beginPath(); c.moveTo(a1.x, a1.y); c.lineTo(a2.x, a2.y); c.stroke(); } }
-  // lights only on the bumper face that points toward the camera (else they'd shine through the body)
-  const toward = fx + fy;                                                              // >0 ⇒ nose is the near face
+  c.fillStyle = 'rgba(0,0,0,0.3)'; poly([P(hl, -hw, 0), P(hl, hw, 0), P(-hl, hw, 0), P(-hl, -hw, 0)]); c.fill();  // shadow
+  // wheels at the axles, split by depth: far pair behind the body, near pair in front
+  const ws = hw + 0.2, wp = [[hl * 0.6, -ws], [hl * 0.6, ws], [-hl * 0.6, ws], [-hl * 0.6, -ws]].map(([u, v]) => ({ u, v, d: depthOf(u, v) })).sort((p, q) => p.d - q.d);
+  wheel(wp[0].u, wp[0].v); wheel(wp[1].u, wp[1].v);                                     // far wheels
+  if (S.wedge) { c.fillStyle = shade(def.col, -12); poly([P(hl, -hw, 1.4), P(hl, hw, 1.4), P(hl * 0.45, hw, z1), P(hl * 0.45, -hw, z1)]); c.fill(); } // wedge nose
+  const ch = box(-hl, hl * (S.wedge ? 0.45 : 1), -hw, hw, z0, z1, def.col, shade(def.col, -32)); // BOTTOM box
+  c.fillStyle = shade(def.col, 14); poly([ch.t[0], ch.t[1], lp(ch.t[1], ch.t[2], 0.5), lp(ch.t[0], ch.t[3], 0.5)]); c.fill(); // hood sheen
+  if (S.bed) { c.fillStyle = '#15151b'; poly([P(-hl + 1, -hw + 1, z1 + 0.1), P(cF, -hw + 1, z1 + 0.1), P(cF, hw - 1, z1 + 0.1), P(-hl + 1, hw - 1, z1 + 0.1)]); c.fill(); } // pickup bed
+  wheel(wp[2].u, wp[2].v); wheel(wp[3].u, wp[3].v);                                     // near wheels (in front of body)
+  const cab = box(cF, cR, -cw, cw, z1, cz, shade(def.col, -6), shade(def.col, -42));   // TOP box (smaller)
+  const gCol = ['#13313b', '#0e2836', '#0c2230', '#0e2836'];                            // front / right / rear / left glass
+  const gf = [0, 1, 2, 3].map(i => ({ i, j: (i + 1) % 4 })).sort((p, q) => (cab.w[p.i] + cab.w[p.j]) - (cab.w[q.i] + cab.w[q.j]));
+  for (const f of gf) { c.fillStyle = gCol[f.i]; poly([cab.b[f.i], cab.b[f.j], cab.t[f.j], cab.t[f.i]]); c.fill(); }
+  if (S.st) { c.strokeStyle = def.col2; c.lineWidth = 1; for (const yo of [-1.4, 1.4]) { const a1 = P(cR, yo, z1 + 0.05), a2 = P(hl - 1, yo, z1 + 0.05); c.beginPath(); c.moveTo(a1.x, a1.y); c.lineTo(a2.x, a2.y); c.stroke(); } } // hood stripes
+  const toward = fx + fy;                                                              // >0 ⇒ nose faces camera
   if (toward > -0.3) { c.fillStyle = '#ffe9a0'; for (const v of [-hw + 1.6, hw - 1.6]) { const p = P(hl, v, S.wedge ? 1.8 : 3); c.fillRect(p.x - 1, p.y - 1, 2, 2); } }
   if (toward < 0.3) { c.fillStyle = '#ff3344'; for (const v of [-hw + 1.6, hw - 1.6]) { const p = P(-hl, v, 3); c.fillRect(p.x - 1, p.y - 1, 2, 2); } }
 }
