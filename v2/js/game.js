@@ -2308,6 +2308,16 @@ function render() {
   for (const d of doors) { const o = proj((d[0] + 0.5) * TILE, (d[1] + 0.5) * TILE, 2); c.globalAlpha = 0.4 + 0.14 * Math.sin(G.rt * 3 + d[0]); c.drawImage(SPR.glowS('#ffb24a', 13), o.x - 13, o.y - 13); }
   for (const pk of G.pickups) { if (!isoVisible(pk.x, pk.y)) continue; const o = proj(pk.x, pk.y, 4); c.globalAlpha = 0.4 + 0.15 * Math.sin(G.rt * 5); const col = pk.kind === 'wpn' ? RAR_COL[WPN[pk.id].rar] : pk.kind === 'ed' ? '#f9f002' : '#2ecc71'; c.drawImage(SPR.glowS(col, 10), o.x - 10, o.y - 10); }
   for (const b of G.bullets) { const o = proj(b.x, b.y, 5); c.globalAlpha = 0.5; c.drawImage(SPR.glowS(b.col, 5), o.x - 5, o.y - 5); }
+  if (G.car && !G.car.dead && G.driving) {                                              // headlight spotlights: a beam fanning forward from each headlight
+    const a = G.car.a, hx = Math.cos(a), hy = Math.sin(a), sx = -hy, sy = hx;
+    const cs = CAR_SHAPE[CARD[G.car.id].shape] || CAR_SHAPE.sedan, zL = cs.wedge ? 2.4 : 4, D = 42, sp = 9;
+    for (const s of [-1, 1]) {
+      const ox = G.car.x + hx * cs.hl + sx * (cs.hw - 1.6) * s, oy = G.car.y + hy * cs.hl + sy * (cs.hw - 1.6) * s, ex = ox + hx * D, ey = oy + hy * D;
+      const o = proj(ox, oy, zL), bC = proj(ex, ey, 0), bL = proj(ex + sx * sp, ey + sy * sp, 0), bR = proj(ex - sx * sp, ey - sy * sp, 0);
+      const g = c.createLinearGradient(o.x, o.y, bC.x, bC.y); g.addColorStop(0, 'rgba(255,236,190,0.5)'); g.addColorStop(1, 'rgba(255,236,190,0)');
+      c.fillStyle = g; c.beginPath(); c.moveTo(o.x, o.y); c.lineTo(bL.x, bL.y); c.lineTo(bR.x, bR.y); c.closePath(); c.fill();
+    }
+  }
   c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
 
   for (const tx of G.texts) { const o = proj(tx.x, tx.y, 11); drawTextC(c, tx.text, o.x, o.y, tx.col, 1); }
@@ -2384,9 +2394,12 @@ function drawCarIso(c, x, y, a, def, pf) {
   const P = (u, v, z) => pf(x + fx * u + sxu * v, y + fy * u + syu * v, z);
   const depthOf = (u, v) => (x + fx * u + sxu * v) + (y + fy * u + syu * v);            // world wx+wy
   const s0 = P(0, 0, 0), sF = P(1, 0, 0), fwdAng = Math.atan2(sF.y - s0.y, sF.x - s0.x); // car's forward, in screen space
-  const wheel = (u, v) => {                                                            // tire oriented along driving dir
-    const w = P(u, v, 1.1); c.fillStyle = '#08080b'; c.beginPath(); c.ellipse(w.x, w.y, 3.2, 1.9, fwdAng, 0, 7); c.fill();
+  const wheel = (u, v, al) => {                                                        // tire oriented along driving dir; al fades visibility
+    al = al == null ? 1 : al; if (al < 0.02) return;
+    const w = P(u, v, 1.1); c.globalAlpha = al;
+    c.fillStyle = '#08080b'; c.beginPath(); c.ellipse(w.x, w.y, 3.2, 1.9, fwdAng, 0, 7); c.fill();
     c.fillStyle = '#2c2c34'; c.beginPath(); c.ellipse(w.x, w.y, 1.3, 0.8, fwdAng, 0, 7); c.fill();
+    c.globalAlpha = 1;
   };
   if (def.bike) {
     const wF = P(6.5, 0, 0), wR = P(-6.5, 0, 0);
@@ -2413,16 +2426,20 @@ function drawCarIso(c, x, y, a, def, pf) {
     return { b, t: tp, w };
   };
   c.fillStyle = 'rgba(0,0,0,0.3)'; poly([P(hl, -hw, 0), P(hl, hw, 0), P(-hl, hw, 0), P(-hl, -hw, 0)]); c.fill();  // shadow
-  // wheels: draw only the two that face the camera; the body hides the other two.
-  // a corner's camera-facing score = its outward normal's depth: wu·(fx+fy) + wv·(fx-fy).
-  const ws = hw + 0.3, F = fx + fy, Sd = (fx - fy) * 1.0001;                            // tiny bias resolves side ties toward the near side
-  const wp = [[hl * 0.6, -ws, 1, -1], [hl * 0.6, ws, 1, 1], [-hl * 0.6, ws, -1, 1], [-hl * 0.6, -ws, -1, -1]]
-    .map(([u, v, su, sv]) => ({ u, v, m: su * F + sv * Sd })).sort((p, q) => q.m - p.m);
+  // wheel visibility: which flank faces the camera (lateral occlusion), blending in the
+  // front/rear end only when the car points toward/away (|fx-fy| small). alpha-faded so it
+  // changes smoothly with heading — no wheel pops in or out at any angle.
+  const ws = hw + 0.3, latK = fx - fy, lonK = fx + fy;
+  const wlist = [[hl * 0.6, -ws], [hl * 0.6, ws], [-hl * 0.6, ws], [-hl * 0.6, -ws]].map(([u, v]) => {
+    const latN = Math.sign(v) * latK, lonN = Math.sign(u) * lonK, g = Math.max(0, 1 - Math.abs(latN) / 0.5);
+    const e = latN + lonN * g;                                                          // signed “faces the camera” amount
+    return { u, v, a: Math.max(0, Math.min(1, (e + 0.4) / 0.8)), d: depthOf(u, v) };
+  }).sort((p, q) => p.d - q.d);                                                          // far → near
   if (S.wedge) { c.fillStyle = shade(def.col, -12); poly([P(hl, -hw, 1.4), P(hl, hw, 1.4), P(hl * 0.45, hw, z1), P(hl * 0.45, -hw, z1)]); c.fill(); } // wedge nose
   const ch = box(-hl, hl * (S.wedge ? 0.45 : 1), -hw, hw, z0, z1, def.col, shade(def.col, -32)); // BOTTOM box
   c.fillStyle = shade(def.col, 14); poly([ch.t[0], ch.t[1], lp(ch.t[1], ch.t[2], 0.5), lp(ch.t[0], ch.t[3], 0.5)]); c.fill(); // hood sheen
   if (S.bed) { c.fillStyle = '#15151b'; poly([P(-hl + 1, -hw + 1, z1 + 0.1), P(cF, -hw + 1, z1 + 0.1), P(cF, hw - 1, z1 + 0.1), P(-hl + 1, hw - 1, z1 + 0.1)]); c.fill(); } // pickup bed
-  wheel(wp[0].u, wp[0].v); wheel(wp[1].u, wp[1].v);                                     // the two camera-facing wheels, in front of the body
+  for (const wl of wlist) wheel(wl.u, wl.v, wl.a);                                       // far → near, faded by visibility, over the body
   const cab = box(cF, cR, -cw, cw, z1, cz, shade(def.col, -6), shade(def.col, -42));   // TOP box (smaller)
   const gCol = ['#13313b', '#0e2836', '#0c2230', '#0e2836'];                            // front / right / rear / left glass
   const gf = [0, 1, 2, 3].map(i => ({ i, j: (i + 1) % 4 })).sort((p, q) => (cab.w[p.i] + cab.w[p.j]) - (cab.w[q.i] + cab.w[q.j]));
