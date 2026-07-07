@@ -9,6 +9,16 @@
 const MIL_R = Math.SQRT1_2;             // 0.70710678 — pure 45° rotation
 const MIL_ZK = 1.0;                     // screen px risen per world-px of height
 const MIL_SH = { x: 0.92, y: 0.55 };    // baked key light from NW → shadows drape SE
+// texture densities: everything is drawn in logical coords but baked N× denser, then
+// smooth-sampled — this is what kills the chunky-pixel look. (Ground halves on small screens.)
+const MIL_BK = ((window.innerWidth || 1280) * (window.devicePixelRatio || 1)) >= 900 ? 2 : 1;
+const MIL_FK = 2;                       // facade / roof textures
+const MIL_AS = 3;                       // actor sprites
+
+function milRR(c, x, y, w, h, r) {
+  if (c.roundRect) { c.beginPath(); c.roundRect(x, y, w, h, r); }
+  else { c.beginPath(); c.rect(x, y, w, h); }
+}
 
 // frame screen offset (set each frame in step/render). _ox/_oy stable (mouse), _shx/_shy add shake (draw)
 function isoSetOffsets() {
@@ -92,8 +102,11 @@ function milBldAt(x, y) {
 // =====================================================================
 function milBakeGround() {
   const W = WORLD.W, H = WORLD.H, T = WORLD.t;
-  const cv = mkCanvas(W * TILE, H * TILE), c = cv.getContext('2d');
+  const cv = mkCanvas(W * TILE * MIL_BK, H * TILE * MIL_BK), c = cv.getContext('2d');
   MILG.cv = cv; MILG.ctx = c;
+  // the plan-space transform STAYS on this ctx forever, so live decals
+  // (bloodStain / tire tracks via worldCtx()) keep writing in world coords
+  c.setTransform(MIL_BK, 0, 0, MIL_BK, 0, 0);
   c.imageSmoothingEnabled = true;
   const road = (tx, ty) => tx >= 0 && ty >= 0 && tx < W && ty < H && T[ty * W + tx] === WT.ROAD;
 
@@ -355,7 +368,8 @@ function milBakeBuildings() {
 
 const WIN_COLS = ['#ffbd6d', '#8fd8ef', '#20303c', '#141821', '#141821', '#c9d6e2'];
 function milFacade(len, hgt, B, dir) {
-  const b = B.b, cv = mkCanvas(len, hgt), c = cv.getContext('2d');
+  const b = B.b, cv = mkCanvas(Math.ceil(len * MIL_FK), Math.ceil(hgt * MIL_FK)), c = cv.getContext('2d');
+  c.setTransform(MIL_FK, 0, 0, MIL_FK, 0, 0);
   const rng = mulberry32(B.seed + (dir === 's' ? 5 : 811));
   // concrete base, subtly lit from above
   const g = c.createLinearGradient(0, 0, 0, hgt);
@@ -432,7 +446,8 @@ function milFacade(len, hgt, B, dir) {
 }
 
 function milRoof(B) {
-  const w = B.x1 - B.x0, h = B.y1 - B.y0, cv = mkCanvas(w, h), c = cv.getContext('2d');
+  const w = B.x1 - B.x0, h = B.y1 - B.y0, cv = mkCanvas(w * MIL_FK, h * MIL_FK), c = cv.getContext('2d');
+  c.setTransform(MIL_FK, 0, 0, MIL_FK, 0, 0);
   const rng = mulberry32(B.seed + 77);
   const base = milMix(B.b.roof, '#3a3f4a', 0.55);
   c.fillStyle = base; c.fillRect(0, 0, w, h);
@@ -477,21 +492,22 @@ function milDrawBuilding(c, B, alpha) {
   const zh = B.hgt * MIL_ZK;
   const pS = proj(B.x0, B.y1, 0), pE = proj(B.x1, B.y0, 0);
   if (alpha < 1) c.globalAlpha = alpha;
-  // south face: runs along +x → screen dir (R, R); texture y maps straight down
+  // south face: runs along +x → screen dir (R, R); texture y maps straight down.
+  // c.transform (not setTransform) so the hi-res base transform composes through.
   c.save();
-  c.setTransform(MIL_R, MIL_R, 0, MIL_ZK, pS.x, pS.y - zh);
+  c.transform(MIL_R / MIL_FK, MIL_R / MIL_FK, 0, MIL_ZK / MIL_FK, pS.x, pS.y - zh);
   c.drawImage(B.fS, 0, 0);
   c.restore();
   // east face: runs along +y → screen dir (−R, R)
   c.save();
-  c.setTransform(-MIL_R, MIL_R, 0, MIL_ZK, pE.x, pE.y - zh);
+  c.transform(-MIL_R / MIL_FK, MIL_R / MIL_FK, 0, MIL_ZK / MIL_FK, pE.x, pE.y - zh);
   c.drawImage(B.fE, 0, 0);
   c.restore();
   // roof: plan-rotated, lifted by zh
   c.save();
   c.translate(G._ox + (G._shx || 0), G._oy + (G._shy || 0) - zh);
   c.rotate(Math.PI / 4);
-  c.drawImage(B.roofCv, B.x0, B.y0);
+  c.drawImage(B.roofCv, B.x0, B.y0, B.x1 - B.x0, B.y1 - B.y0);
   c.restore();
   // blinking aircraft-warning lamp
   if (B.ant) {
@@ -511,15 +527,15 @@ function milBakeActors() {
   const civPal = [
     { skin: '#c99772', hair: '#2a2018', jacket: '#3f4652', shirt: '#6a7280', pants: '#2c303c' },
     { skin: '#8a5c3c', hair: '#141210', jacket: '#4c3a30', shirt: '#8a8474', pants: '#33302a' },
-    { skin: '#e0ac84', hair: '#7a5a2c', jacket: '#54424e', shirt: '#b0a8b8', pants: '#3a3444' },
+    { skin: '#e0ac84', hair: '#7a5a2c', jacket: '#54424e', shirt: '#b0a8b8', pants: '#3a3444', hairLong: 1 },
     { skin: '#b98a64', hair: '#3c2c1e', jacket: '#37464a', shirt: '#7c959a', pants: '#2c3438' },
-    { skin: '#d8a082', hair: '#8a2c4a', jacket: '#4a3554', shirt: '#c07898', pants: '#322c3c' },
+    { skin: '#d8a082', hair: '#8a2c4a', jacket: '#4a3554', shirt: '#c07898', pants: '#322c3c', hairLong: 1 },
     { skin: '#a8764e', hair: '#1c1c22', jacket: '#5a4a34', shirt: '#c9b98a', pants: '#3c3428' },
   ];
   MSPR._civ = civPal.map(p => milActorSet(p));
   MSPR.player = {
     m: milActorSet({ skin: '#d8a67e', hair: '#2c221a', jacket: '#4a5162', shirt: '#a62a3a', pants: '#3e4456', boots: '#23252e', trim: '#dfe4f0' }),
-    f: milActorSet({ skin: '#e2b08c', hair: '#a63e52', jacket: '#4a5162', shirt: '#a62a3a', pants: '#3e4456', boots: '#23252e', trim: '#dfe4f0' }),
+    f: milActorSet({ skin: '#e2b08c', hair: '#a63e52', jacket: '#4a5162', shirt: '#a62a3a', pants: '#3e4456', boots: '#23252e', trim: '#dfe4f0', hairLong: 1 }),
   };
   MSPR.psycho = milActorSet({ skin: '#b0b6c4', hair: '#10121a', jacket: '#2a1c34', shirt: '#bd00ff', pants: '#1e1626', trim: '#bd00ff' });
   MSPR.crate = milCrate();
@@ -542,59 +558,101 @@ function milActorSet(o) {
   for (const face of ['down', 'up', 'side']) s[face] = [0, 1].map(f => milPaintActor(face, f, o));
   return s;
 }
-// 12×20 canvas, feet at (6, 19). Realistic proportions (head ≈ 1/5 of height), soft NW key light.
+// 12×20 logical figure baked MIL_AS× dense — rounded anatomy, gradients, soft NW key
+// light. Sampled back down smoothly, so it reads as a small painted person, not pixels.
 function milPaintActor(face, f, o) {
-  const cv = mkCanvas(12, 20), c = cv.getContext('2d');
-  const jkD = milMix(o.jacket, '#000000', 0.28), jkL = milMix(o.jacket, '#ffffff', 0.34);
-  const pnD = milMix(o.pants, '#000000', 0.22);
-  const boot = o.boots || '#232530';
-  const stride = f ? 1 : -1;
+  const S = MIL_AS, cv = mkCanvas(12 * S, 20 * S), c = cv.getContext('2d');
+  c.setTransform(S, 0, 0, S, 0, 0);
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  const jkD = milMix(o.jacket, '#000000', 0.30), jkL = milMix(o.jacket, '#ffffff', 0.24);
+  const skD = milMix(o.skin, '#000000', 0.16), skL = milMix(o.skin, '#ffffff', 0.16);
+  const pnD = milMix(o.pants, '#000000', 0.24);
+  const boot = o.boots || '#23252e';
+  const sw = f ? 1 : -1;                                                   // walk stride
+  const limb = (x0, y0, x1, y1, col, w) => { c.strokeStyle = col; c.lineWidth = w; c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); };
   if (face === 'side') {
-    // profile: one shoulder toward us
-    c.fillStyle = o.pants; c.fillRect(5 + stride, 14, 2, 4); c.fillStyle = pnD; c.fillRect(5 - stride, 14, 2, 4);
-    c.fillStyle = boot; c.fillRect(5 + stride, 18, 2.6, 1.6); c.fillRect(5 - stride, 18, 2, 1.4);
-    c.fillStyle = o.jacket; c.fillRect(4, 7, 5, 7);
-    c.fillStyle = jkL; c.fillRect(4, 7, 5, 1.4); c.fillRect(4, 7, 1, 6);
-    c.fillStyle = jkD; c.fillRect(8, 8, 1, 6); c.fillRect(4, 12.6, 5, 1.4);
-    c.fillStyle = o.jacket; c.fillRect(5.6, 9, 2, 4.4);                    // near arm
-    c.fillStyle = o.skin; c.fillRect(6, 13, 1.4, 1.2);                     // hand
-    c.fillStyle = o.skin; c.fillRect(4.6, 2.6, 4, 4);                      // head
-    c.fillStyle = milMix(o.skin, '#000000', 0.22); c.fillRect(4.6, 5.6, 4, 1);
-    c.fillStyle = o.hair; c.fillRect(4, 2, 4.4, 2); c.fillRect(4, 3.6, 1.6, 2.6);  // hair w/ back
-    c.fillStyle = milMix(o.skin, '#ffffff', 0.1); c.fillRect(8.4, 4, 0.8, 1.4);    // nose
+    // far leg + boot (in shade)
+    limb(6, 13.4, 6 - sw * 1.5, 18.1, pnD, 2);
+    limb(6 - sw * 1.5, 18.1, 6 - sw * 2.2, 18.7, boot, 2);
+    // torso profile
+    const g = c.createLinearGradient(3.4, 0, 8.8, 0);
+    g.addColorStop(0, jkL); g.addColorStop(0.55, o.jacket); g.addColorStop(1, jkD);
+    c.fillStyle = g; milRR(c, 3.7, 6.7, 5, 7, 2); c.fill();
+    // near leg + boot
+    limb(6.2, 13.4, 6.2 + sw * 1.6, 18.1, o.pants, 2.1);
+    limb(6.2 + sw * 1.6, 18.1, 6.2 + sw * 2.4, 18.7, boot, 2.1);
+    // near arm swings opposite the near leg
+    limb(6.1, 8.4, 6.1 - sw * 1.2, 12.6, milMix(o.jacket, '#000000', 0.12), 1.8);
+    c.fillStyle = o.skin; c.beginPath(); c.arc(6.1 - sw * 1.2, 13.1, 0.8, 0, 7); c.fill();
+    // head profile: skull, jaw shade, nose, hair mass at the back
+    const hg = c.createRadialGradient(5.8, 3.4, 0.4, 6.3, 4.2, 2.6);
+    hg.addColorStop(0, skL); hg.addColorStop(1, skD);
+    c.fillStyle = hg; c.beginPath(); c.arc(6.3, 4.2, 2.2, 0, 7); c.fill();
+    c.fillStyle = o.skin; c.beginPath(); c.arc(8.35, 4.7, 0.5, 0, 7); c.fill();       // nose
+    c.fillStyle = o.skin; c.fillRect(5.6, 6.1, 1.2, 0.8);                             // neck
+    c.fillStyle = o.hair;
+    c.beginPath(); c.arc(6.1, 4, 2.35, Math.PI * 0.55, Math.PI * 1.75); c.quadraticCurveTo(6.4, 2.4, 7.6, 2.9); c.closePath(); c.fill();
+    if (o.hairLong) { milRR(c, 3.9, 3.6, 1.7, 5, 0.8); c.fill(); }
+    c.fillStyle = '#10131a'; c.fillRect(7.25, 4.05, 0.75, 0.7);                       // eye
+    if (o.trim) { c.fillStyle = o.trim; c.fillRect(5.4, 6.65, 2.2, 0.7); }            // collar
   } else {
     const back = face === 'up';
-    // legs — walking stride
-    c.fillStyle = o.pants; c.fillRect(3.6, 13.6, 2.2, 4.6 + stride * 0.7);
-    c.fillStyle = pnD; c.fillRect(6.2, 13.6, 2.2, 4.6 - stride * 0.7);
-    c.fillStyle = boot; c.fillRect(3.6, 17.6 + stride * 0.7, 2.2, 1.6); c.fillRect(6.2, 17.6 - stride * 0.7, 2.2, 1.6);
-    // torso: jacket w/ NW highlight
-    c.fillStyle = o.jacket; c.fillRect(2.6, 6.8, 6.8, 7.2);
-    c.fillStyle = jkL; c.fillRect(2.6, 6.8, 6.8, 1.4); c.fillRect(2.6, 6.8, 1.2, 6.6);
-    c.fillStyle = jkD; c.fillRect(8.2, 7.6, 1.2, 6.4); c.fillRect(3, 13, 6.4, 1);
+    // legs + boots, striding
+    limb(4.7, 13.4, 4.5, 18.1 + sw * 0.4, back ? pnD : o.pants, 2.1);
+    limb(7.3, 13.4, 7.5, 18.1 - sw * 0.4, pnD, 2.1);
+    limb(4.5, 18.1 + sw * 0.4, 4.4, 18.8 + sw * 0.4, boot, 2.2);
+    limb(7.5, 18.1 - sw * 0.4, 7.6, 18.8 - sw * 0.4, boot, 2.2);
+    // arms w/ counter-swing, bare hands
+    limb(3.1, 8.2, 2.7 - sw * 0.35, 12.5, jkD, 1.8);
+    limb(8.9, 8.2, 9.3 + sw * 0.35, 12.5, jkD, 1.8);
+    c.fillStyle = o.skin;
+    c.beginPath(); c.arc(2.7 - sw * 0.35, 13, 0.8, 0, 7); c.fill();
+    c.beginPath(); c.arc(9.3 + sw * 0.35, 13, 0.8, 0, 7); c.fill();
+    // torso: rounded jacket, NW-lit, subtle contour
+    const g = c.createLinearGradient(2.4, 6.4, 9.6, 13.6);
+    g.addColorStop(0, jkL); g.addColorStop(0.5, o.jacket); g.addColorStop(1, jkD);
+    c.fillStyle = g; milRR(c, 2.7, 6.6, 6.6, 7.2, 2.2); c.fill();
+    c.strokeStyle = 'rgba(0,0,0,0.22)'; c.lineWidth = 0.5; milRR(c, 2.95, 6.85, 6.1, 6.7, 2); c.stroke();
     if (!back) {
-      c.fillStyle = o.shirt; c.fillRect(5, 7.4, 2.2, 4.8);                 // open jacket / shirt line
-      if (o.trim) { c.fillStyle = o.trim; c.fillRect(4.2, 6.9, 1, 2.2); c.fillRect(6.8, 6.9, 1, 2.2); } // collar
-    } else if (o.trim) { c.fillStyle = milRgba(o.trim, 0.7); c.fillRect(3.8, 8.4, 4.4, 1.2); }      // back logo band
-    // arms
-    c.fillStyle = jkD; c.fillRect(1.8, 7.6, 1.6, 5 - stride * 0.5); c.fillRect(8.6, 7.6, 1.6, 5 + stride * 0.5);
-    c.fillStyle = o.skin; c.fillRect(2, 12.2 - stride * 0.5, 1.2, 1.2); c.fillRect(8.8, 12.2 + stride * 0.5, 1.2, 1.2);
-    // head
-    c.fillStyle = o.skin; c.fillRect(3.8, 2.4, 4.4, 4.4);
-    c.fillStyle = milMix(o.skin, '#000000', 0.22); c.fillRect(3.8, 5.8, 4.4, 1);
-    if (back) { c.fillStyle = o.hair; c.fillRect(3.6, 1.8, 4.8, 4); }
-    else {
-      c.fillStyle = o.hair; c.fillRect(3.6, 1.8, 4.8, 1.8); c.fillRect(3.6, 3, 1, 1.6); c.fillRect(7.4, 3, 1, 1.6);
-      c.fillStyle = '#101218'; c.fillRect(4.6, 4.2, 1, 1); c.fillRect(6.4, 4.2, 1, 1); // eyes
+      const sg = c.createLinearGradient(0, 7, 0, 13);
+      sg.addColorStop(0, milMix(o.shirt, '#ffffff', 0.14)); sg.addColorStop(1, milMix(o.shirt, '#000000', 0.26));
+      c.fillStyle = sg; milRR(c, 5.1, 7.1, 1.8, 5.6, 0.8); c.fill();                  // open jacket / shirt
+      if (o.trim) {                                                                    // collar lapels
+        c.fillStyle = o.trim;
+        c.beginPath(); c.moveTo(4.3, 6.85); c.lineTo(5.35, 6.85); c.lineTo(4.75, 8.7); c.closePath(); c.fill();
+        c.beginPath(); c.moveTo(7.7, 6.85); c.lineTo(6.65, 6.85); c.lineTo(7.25, 8.7); c.closePath(); c.fill();
+      }
+      c.fillStyle = 'rgba(0,0,0,0.38)'; c.fillRect(3.2, 12.9, 5.6, 0.7);              // belt
+      c.fillStyle = '#c9cfdd'; c.fillRect(5.65, 12.9, 0.75, 0.7);                     // buckle
+    } else if (o.trim) {
+      c.fillStyle = milRgba(o.trim, 0.4); milRR(c, 3.8, 8.7, 4.4, 0.9, 0.45); c.fill(); // gang band across the back
     }
-    c.fillStyle = milMix(o.skin, '#ffffff', 0.12); c.fillRect(4, 2.8, 1.4, 1);         // brow catchlight
+    // head: shaded skull + neck
+    const hg = c.createRadialGradient(5.3, 3.4, 0.4, 6, 4.3, 2.7);
+    hg.addColorStop(0, skL); hg.addColorStop(1, skD);
+    c.fillStyle = hg; c.beginPath(); c.arc(6, 4.2, 2.25, 0, 7); c.fill();
+    c.fillStyle = skD; c.fillRect(5.4, 6.1, 1.2, 0.8);                                // neck
+    if (back) {
+      c.fillStyle = o.hair; c.beginPath(); c.arc(6, 4.05, 2.3, 0, 7); c.fill();
+      if (o.hairLong) { c.fillStyle = o.hair; milRR(c, 4.6, 4.6, 2.8, 3.8, 1.2); c.fill(); }
+    } else {
+      c.fillStyle = o.hair;
+      c.beginPath(); c.arc(6, 4.05, 2.32, Math.PI * 0.98, Math.PI * 2.02); c.closePath(); c.fill(); // top cap
+      c.fillRect(3.68, 3.9, 0.9, 1.3); c.fillRect(7.42, 3.9, 0.9, 1.3);               // temples
+      if (o.hairLong) { milRR(c, 3.5, 3.7, 1.3, 4.6, 0.6); c.fill(); milRR(c, 7.2, 3.7, 1.3, 4.6, 0.6); c.fill(); }
+      c.fillStyle = '#10131a';
+      c.fillRect(5.0, 4.35, 0.75, 0.7); c.fillRect(6.25, 4.35, 0.75, 0.7);            // eyes
+      c.fillStyle = 'rgba(255,255,255,0.28)'; c.fillRect(5.0, 4.3, 0.75, 0.22); c.fillRect(6.25, 4.3, 0.75, 0.22);
+      c.fillStyle = 'rgba(0,0,0,0.16)'; c.fillRect(5.35, 5.6, 1.3, 0.45);             // mouth shade
+    }
   }
   return cv;
 }
 
-// actor billboard: baked SE contact shadow to match the world's sun
-function milBill(c, spr, x, y, alpha, scale, flip, shadow) {
-  const s = proj(x, y, 0); scale = scale || 1;
+// actor billboard: baked SE contact shadow to match the world's sun.
+// sw/sh = the sprite's LOGICAL size (sources are baked denser and smooth-sampled).
+function milBill(c, spr, x, y, alpha, scale, flip, shadow, sw, sh) {
+  const s = proj(x, y, 0); scale = scale || 1; sw = sw || 12; sh = sh || 20;
   if (shadow !== false) {
     c.fillStyle = 'rgba(3,5,13,0.45)';
     c.beginPath(); c.ellipse(s.x + 2 * scale, s.y + 0.6, 4.6 * scale, 2 * scale, 0.5, 0, 7); c.fill();
@@ -602,7 +660,7 @@ function milBill(c, spr, x, y, alpha, scale, flip, shadow) {
   c.save(); if (alpha != null) c.globalAlpha = alpha;
   c.translate(s.x, s.y + 0.5);
   if (flip) c.scale(-scale, scale); else c.scale(scale, scale);
-  c.drawImage(spr, -6, -20);
+  c.drawImage(spr, -sw / 2, -sh, sw, sh);
   c.restore(); c.globalAlpha = 1;
 }
 
@@ -618,11 +676,15 @@ function milPrism(c, x0, y0, x1, y1, h, top, lt, dk, alpha) {
 }
 
 function milCrate() {
-  const cv = mkCanvas(16, 16), c = cv.getContext('2d');
-  c.fillStyle = '#6e5836'; c.fillRect(1, 1, 14, 14);
-  c.fillStyle = '#83693f'; c.fillRect(1, 1, 14, 3); c.fillRect(1, 1, 3, 14);
-  c.fillStyle = 'rgba(0,0,0,0.32)'; c.fillRect(1, 7, 14, 1); c.fillRect(7, 1, 1, 14); c.fillRect(1, 14, 14, 1); c.fillRect(14, 1, 1, 14);
-  c.fillStyle = '#c9b23c'; c.fillRect(2, 2, 4, 2); c.fillRect(10, 12, 4, 2);
+  const S = MIL_FK, cv = mkCanvas(16 * S, 16 * S), c = cv.getContext('2d');
+  c.setTransform(S, 0, 0, S, 0, 0);
+  const g = c.createLinearGradient(1, 1, 15, 15);
+  g.addColorStop(0, '#83693f'); g.addColorStop(1, '#5c4a2c');
+  c.fillStyle = g; c.fillRect(1, 1, 14, 14);
+  c.fillStyle = 'rgba(255,255,255,0.10)'; c.fillRect(1, 1, 14, 1.4); c.fillRect(1, 1, 1.4, 14);
+  c.fillStyle = 'rgba(0,0,0,0.32)'; c.fillRect(1, 7.3, 14, 0.8); c.fillRect(7.3, 1, 0.8, 14); c.fillRect(1, 14.2, 14, 0.8); c.fillRect(14.2, 1, 0.8, 14);
+  c.fillStyle = 'rgba(0,0,0,0.18)'; for (let k = 2; k < 14; k += 2.4) c.fillRect(1, k, 14, 0.35);  // plank grain
+  c.fillStyle = '#c9b23c'; c.fillRect(2, 2, 4, 1.8); c.fillRect(10, 12.2, 4, 1.8);
   return cv;
 }
 
@@ -634,11 +696,12 @@ function milBush(kind) {
     neon: ['#1c2a3a', '#22506a', '#05d9e8'], scrub: ['#3a3420', '#514a2c', '#6a6038'],
     grass: ['#243a1e', '#33552a', '#4a7a3a'], dead: ['#33291c', '#4a3a26', '#5c4a30'],
   };
-  const p = PAL[kind] || PAL.bush, cv = mkCanvas(20, 16), c = cv.getContext('2d');
+  const p = PAL[kind] || PAL.bush, S = MIL_AS, cv = mkCanvas(20 * S, 16 * S), c = cv.getContext('2d');
+  c.setTransform(S, 0, 0, S, 0, 0);
   const rng = mulberry32(kind.length * 977 + 5);
   c.fillStyle = p[0]; c.beginPath(); c.ellipse(10, 10, 8.6, 5.2, 0, 0, 7); c.fill();
-  for (let k = 0; k < 9; k++) { c.fillStyle = rng() < 0.5 ? p[1] : p[0]; c.beginPath(); c.ellipse(4 + rng() * 12, 6 + rng() * 6, 2.4 + rng() * 2, 1.8 + rng() * 1.4, 0, 0, 7); c.fill(); }
-  for (let k = 0; k < 6; k++) { c.fillStyle = p[2]; c.globalAlpha = kind === 'neon' ? 0.85 : 0.5; c.fillRect(4 + rng() * 11, 4 + rng() * 6, 1.4, 1.4); c.globalAlpha = 1; }
+  for (let k = 0; k < 12; k++) { c.fillStyle = rng() < 0.5 ? p[1] : p[0]; c.beginPath(); c.ellipse(4 + rng() * 12, 6 + rng() * 6, 2.4 + rng() * 2, 1.8 + rng() * 1.4, rng() * 3, 0, 7); c.fill(); }
+  for (let k = 0; k < 8; k++) { c.fillStyle = p[2]; c.globalAlpha = kind === 'neon' ? 0.85 : 0.45; c.beginPath(); c.ellipse(4 + rng() * 11, 4 + rng() * 7, 0.9, 0.7, rng() * 3, 0, 7); c.fill(); c.globalAlpha = 1; }
   MSPR.bushes[kind] = cv;
   return cv;
 }

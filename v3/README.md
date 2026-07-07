@@ -1,4 +1,9 @@
-# NIGHT CITY — v3 (tactical / Commandos-style fake 3D)
+# NIGHT CITY — v3 (tactical / Commandos-style fake 3D, realistic — no pixel art)
+
+**Presentation:** unlike v1/v2 this edition is *not* pixel art. Logic stays 640×360, but the
+backing store renders up to 3× denser with smooth sampling; the ground/facades/actors are baked
+2–3× dense; text is real typography (system fonts via `fillText`, still zero-dep); the CRT
+scanlines and pixel cursor are gone (cinematic vignette + vector pointer instead).
 
 **v3 is v1, re-skinned — again.** The *exact same game* as the top-down and isometric builds —
 all 39 weapons, iconics, 12 cars, 17 cyberware, bounties, cyberpsychos, shops, districts,

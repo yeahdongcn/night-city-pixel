@@ -56,7 +56,7 @@ function drawTitle(c) {
   // the actual city map, rotated to the military camera
   if (WORLD) {
     c.save(); c.translate(mcx, mcy); c.rotate(Math.PI / 4);
-    c.globalAlpha = 0.42; c.imageSmoothingEnabled = false;
+    c.globalAlpha = 0.42;
     c.drawImage(WORLD.mini, -175, -175, 350, 350);
     c.globalAlpha = 1; c.restore();
   }
@@ -168,7 +168,7 @@ function titleGender(c) {
     c.fillStyle = sel ? 'rgba(58,255,154,0.08)' : 'rgba(255,255,255,0.03)'; c.fillRect(cx - fw / 2, fy, fw, fh);
     c.strokeStyle = sel ? '#3aff9a' : 'rgba(255,255,255,0.14)'; c.lineWidth = sel ? 1.5 : 1; c.strokeRect(cx - fw / 2 + 0.5, fy + 0.5, fw - 1, fh - 1); c.lineWidth = 1;
     if (sel) { c.fillStyle = '#7dff5a'; for (const ox of [-fw / 2, fw / 2 - 3]) for (const oy of [0, fh - 3]) c.fillRect(cx + ox, fy + oy, 3, 3); }
-    c.imageSmoothingEnabled = false;
+
     c.drawImage(MSPR.player[i ? 'f' : 'm'].down[sel ? frame : 0], cx - 24, fy + 12, 48, 80);
     drawTextC(c, i ? 'FEMALE V' : 'MALE V', cx, fy + fh - 13, sel ? '#dfffe2' : '#6a7286', 1);
     if (hot && G.mouse.click) { G.mouse.click = false; if (sel) { startGame(false, i ? 'f' : 'm'); return; } G.uiS.sel = i; }
@@ -236,10 +236,10 @@ function drawHUD(c) {
   // weapon card
   const w = curWpn();
   const wx = VIEW_W - 148, wy = VIEW_H - 46;
-  c.fillStyle = 'rgba(6,8,14,0.7)'; c.fillRect(wx, wy, 140, 38);
+  c.fillStyle = 'rgba(5,7,12,0.9)'; c.fillRect(wx, wy, 140, 38);
   c.fillStyle = RAR_COL[w ? w.rar : 0]; c.fillRect(wx, wy, 140, 1);
   if (w) {
-    c.drawImage(SPR.wicon(w.cls, KIND_COL[w.kind]), wx + 4, wy + 5);
+    c.drawImage(SPR.wicon(w.cls, KIND_COL[w.kind]), wx + 4, wy + 5, 24, 10);
     drawText(c, trunc(w.name, 22), wx + 4, wy + 17, RAR_COL[w.rar], 1);
     if (MELEE_CLS[w.cls]) drawText(c, '—', wx + 32, wy + 26, '#cfd6e4', 1);
     else {
@@ -306,7 +306,7 @@ function drawMinimap(c) {
   c.beginPath(); c.arc(cx, cy, r, 0, 7); c.clip();
   c.fillStyle = 'rgba(4,7,10,0.86)'; c.fillRect(cx - r, cy - r, r * 2, r * 2);
   c.save(); c.translate(cx, cy); c.rotate(Math.PI / 4);
-  c.imageSmoothingEnabled = false; c.globalAlpha = 0.9;
+  c.globalAlpha = 0.9;
   c.drawImage(WORLD.mini, tx, ty, range, range, -S * 0.75, -S * 0.75, S * 1.5, S * 1.5);
   c.globalAlpha = 1; c.restore();
   // sweep
@@ -492,7 +492,7 @@ function statRow(c, x, y, label, frac, col, txt) {
 function drawShopGuns(c) {
   const stock = WEAPONS.filter(w => !w.iconic && !w.granted && !w.hidden);
   const r = shopList(c, stock, (cc, w, x, y, on) => {
-    cc.drawImage(SPR.wicon(w.cls, KIND_COL[w.kind]), x, y + 1);
+    cc.drawImage(SPR.wicon(w.cls, KIND_COL[w.kind]), x, y + 1, 24, 10);
     drawText(cc, trunc(w.name, 26), x + 28, y + 3, G.weapons[w.id] ? '#5a6372' : RAR_COL[w.rar], 1);
     const right = G.weapons[w.id] ? 'OWNED' : G.lvl < w.lvl ? 'LV' + w.lvl : '€$' + fmt(w.price);
     drawTextR(cc, right, x + 272, y + 3, G.weapons[w.id] ? '#5a6372' : G.lvl < w.lvl ? '#ff5a5a' : G.eddies >= w.price ? '#2ecc71' : '#ff5a5a', 1);
@@ -681,7 +681,7 @@ function invWeapons(c) {
     c.fillStyle = s.sel === i ? 'rgba(249,240,2,0.12)' : 'rgba(255,255,255,0.04)';
     c.fillRect(x, y, cw - 3, ch - 3);
     c.fillStyle = have ? RAR_COL[w.rar] : 'rgba(255,255,255,0.1)'; c.fillRect(x, y, cw - 3, 1);
-    if (have) c.drawImage(SPR.wicon(w.cls, KIND_COL[w.kind]), x + 18, y + 6);
+    if (have) c.drawImage(SPR.wicon(w.cls, KIND_COL[w.kind]), x + 18, y + 6, 24, 10);
     else drawTextC(c, w.hidden ? '???' : trunc(w.name.split(' ')[0], 8), x + 30, y + 8, 'rgba(120,130,150,0.5)', 1);
     const li = G.loadout.indexOf(w.id);
     if (li >= 0) drawText(c, String(li + 1), x + 2, y + 2, '#f9f002', 1);

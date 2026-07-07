@@ -2209,6 +2209,115 @@ function visible(x, y, m) { return isoVisible(x, y, m); }
 // gore decals & tire marks bake into the TACTICAL ground, not v1's pixel canvas
 function worldCtx() { milEnsure(); return MILG.ctx; }
 
+// ---- hi-res presentation: logic stays 640×360, the backing store is K× denser ----
+// (this + the dense bakes is what removes the chunky-pixel look entirely)
+let MIL_K = 1;
+function fitCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = window.innerWidth, h = window.innerHeight;
+  let s = Math.min(w * dpr / VIEW_W, h * dpr / VIEW_H);
+  if (s >= 1) s = Math.floor(s);
+  CV.style.width = (VIEW_W * s / dpr) + 'px';
+  CV.style.height = (VIEW_H * s / dpr) + 'px';
+  MIL_K = clamp(s, 1, 3);
+  CV.width = VIEW_W * MIL_K; CV.height = VIEW_H * MIL_K;   // resets ctx state; render re-arms it
+  if (window.matchMedia && fitCanvas._dpr !== dpr) {
+    fitCanvas._dpr = dpr;
+    try { window.matchMedia('(resolution: ' + dpr + 'dppx)').addEventListener('change', fitCanvas, { once: true }); } catch (e) {}
+  }
+}
+
+// ---- real typography (system fonts via fillText — still zero-dep) ----
+// same metrics contract as the bitmap font: glyphs ~5*sc tall, y = top of the line.
+const MIL_FONT = '"Bahnschrift", "Bahnschrift Condensed", "DIN Alternate", "Oswald", "Arial Narrow", "Segoe UI", Roboto, sans-serif';
+const _fmc = mkCanvas(4, 4).getContext('2d');
+function _fontOf(sc) { return '600 ' + (6.8 * (sc || 1)).toFixed(1) + 'px ' + MIL_FONT; }
+function textW(s, sc) {
+  _fmc.font = _fontOf(sc);
+  const w = _fmc.measureText(String(s).toUpperCase()).width;
+  return typeof w === 'number' ? w : String(s).length * 4 * (sc || 1); // headless-stub fallback
+}
+function drawText(c, s, x, y, col, sc) {
+  if (s == null || s === '') return;
+  sc = sc || 1;
+  c.font = _fontOf(sc); c.fillStyle = col || '#cfd6e4'; c.textBaseline = 'alphabetic';
+  c.fillText(String(s).toUpperCase(), x, y + 5 * sc);
+}
+function drawTextC(c, s, cx, y, col, sc) { drawText(c, s, cx - textW(s, sc) / 2, y, col, sc); }
+function drawTextR(c, s, rx, y, col, sc) { drawText(c, s, rx - textW(s, sc), y, col, sc); }
+
+// vector pointer replaces the pixel cursor sprite
+function drawCursorSpr(c) {
+  if (TOUCH.on) return;
+  const x = G.mouse.sx, y = G.mouse.sy;
+  c.beginPath();
+  c.moveTo(x, y); c.lineTo(x + 8.6, y + 8.8); c.lineTo(x + 5, y + 9.1);
+  c.lineTo(x + 6.8, y + 13.2); c.lineTo(x + 4.5, y + 14.2); c.lineTo(x + 2.7, y + 10.1); c.lineTo(x, y + 12.8);
+  c.closePath();
+  c.fillStyle = 'rgba(8,10,14,0.9)'; c.fill();
+  c.strokeStyle = '#dfe8f2'; c.lineWidth = 1; c.stroke();
+}
+
+// hi-res weapon glyphs: same silhouettes as v1, baked 3× dense with shaded metal
+// (later declaration wins — SPR.wicon resolves wiconCanvas at call time)
+function wiconCanvas(cls, col) {
+  const S = 3, cv = mkCanvas(24 * S, 10 * S), c = cv.getContext('2d');
+  c.setTransform(S, 0, 0, S, 0, 0);
+  const bg = c.createLinearGradient(0, 1, 0, 9);
+  bg.addColorStop(0, '#f2f6fd'); bg.addColorStop(0.5, '#c8d2e2'); bg.addColorStop(1, '#97a1b4');
+  const body = bg, dark = '#79839a';
+  c.shadowColor = 'rgba(0,0,0,0.5)'; c.shadowBlur = 1; c.shadowOffsetY = 0.4;
+  c.fillStyle = body;
+  switch (cls) {
+    case 'pistol':
+      c.fillRect(4, 3, 11, 2); c.fillStyle = dark; c.fillRect(11, 5, 3, 4); c.fillStyle = col; c.fillRect(4, 2, 8, 1); break;
+    case 'revolver':
+      c.fillRect(3, 3, 12, 2); c.fillRect(8, 2, 4, 4); c.fillStyle = dark; c.fillRect(12, 5, 3, 4); c.fillStyle = col; c.fillRect(8, 2, 4, 1); break;
+    case 'smg':
+      c.fillRect(3, 3, 13, 2); c.fillStyle = dark; c.fillRect(12, 5, 3, 3); c.fillRect(8, 5, 2, 4); c.fillStyle = col; c.fillRect(3, 2, 6, 1); break;
+    case 'rifle':
+      c.fillRect(1, 3, 17, 2); c.fillStyle = dark; c.fillRect(18, 3, 5, 3); c.fillRect(11, 5, 3, 4); c.fillStyle = col; c.fillRect(1, 2, 9, 1); break;
+    case 'shotgun':
+      c.fillRect(1, 3, 15, 3); c.fillStyle = dark; c.fillRect(16, 3, 6, 3); c.fillRect(6, 6, 5, 2); c.fillStyle = col; c.fillRect(1, 3, 6, 1); break;
+    case 'sniper':
+      c.fillRect(0, 4, 18, 2); c.fillStyle = dark; c.fillRect(18, 4, 5, 3); c.fillRect(12, 6, 2, 3); c.fillStyle = col; c.fillRect(7, 1, 6, 2); break;
+    case 'lmg':
+      c.fillRect(1, 3, 16, 3); c.fillStyle = dark; c.fillRect(17, 3, 5, 4); c.fillRect(7, 6, 4, 4); c.fillStyle = col; c.fillRect(1, 2, 8, 1); break;
+    case 'blade':
+      c.beginPath(); c.moveTo(2, 8); c.lineTo(15, 8); c.lineTo(16, 5.4); c.quadraticCurveTo(9, 4.6, 2, 6.8); c.closePath(); c.fill();
+      c.fillStyle = dark; c.fillRect(16, 1, 2, 5); c.fillRect(17, 3, 5, 2); c.fillStyle = col; c.fillRect(2, 7.4, 3, 0.8); break;
+    case 'blunt':
+      c.fillStyle = dark; c.fillRect(16, 5, 6, 2);
+      c.fillStyle = body; c.fillRect(3, 3, 13, 4); c.fillStyle = col; c.fillRect(4, 2, 2, 2); c.fillRect(9, 6, 2, 2); break;
+    case 'mantis':
+      c.beginPath(); c.moveTo(3, 9); c.quadraticCurveTo(8, 7.6, 13, 3.4); c.lineTo(14.4, 4.6); c.quadraticCurveTo(9, 8.6, 4, 10); c.closePath(); c.fill();
+      c.fillStyle = col; c.beginPath(); c.moveTo(10, 8); c.quadraticCurveTo(14, 6, 18, 2.4); c.lineTo(19, 3.6); c.quadraticCurveTo(15, 7, 11, 9); c.closePath(); c.fill();
+      c.fillStyle = dark; c.fillRect(18, 6, 4, 3); break;
+    case 'gorilla':
+      c.fillRect(6, 2, 12, 7); c.fillStyle = dark; c.fillRect(8, 2, 1, 7); c.fillRect(11, 2, 1, 7); c.fillRect(14, 2, 1, 7);
+      c.fillStyle = col; c.fillRect(6, 2, 12, 1); break;
+    case 'wire': {
+      c.strokeStyle = col; c.lineWidth = 0.9; c.beginPath();
+      for (let i = 0; i <= 18; i++) { const x = 2 + i, y = 5.5 + Math.sin(i * 0.7) * 2; i ? c.lineTo(x, y) : c.moveTo(x, y); }
+      c.stroke();
+      c.fillStyle = dark; c.fillRect(19, 4, 4, 4); break;
+    }
+    case 'launcher':
+      c.fillRect(2, 3, 14, 4); c.fillStyle = '#0a0a0c'; c.fillRect(2, 4, 3, 2);
+      c.fillStyle = dark; c.fillRect(16, 3, 5, 5); c.fillStyle = col; c.fillRect(6, 2, 8, 1); break;
+  }
+  c.shadowBlur = 0; c.shadowOffsetY = 0;
+  return cv;
+}
+
+// cinematic frame: vignette + a whisper of anamorphic shading (replaces CRT scanlines)
+function milVignette(c) {
+  const g = c.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.52, VIEW_W / 2, VIEW_H / 2, VIEW_W * 0.72);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(2,4,9,0.44)');
+  c.fillStyle = g; c.fillRect(0, 0, VIEW_W, VIEW_H);
+  c.fillStyle = 'rgba(4,7,14,0.22)'; c.fillRect(0, 0, VIEW_W, 7); c.fillRect(0, VIEW_H - 7, VIEW_W, 7);
+}
+
 function milRoofAlphaAt(tx, ty) {
   let a = 1;
   for (const r of WORLD.roofs) { if (tx >= r.tx0 && tx <= r.tx1 && ty >= r.ty0 && ty <= r.ty1 && r.a < a) a = r.a; }
@@ -2279,9 +2388,12 @@ function drawCarGrid(c) {
 function render() {
   const c = C;
   milEnsure();
+  c.setTransform(MIL_K, 0, 0, MIL_K, 0, 0);               // hi-res base; all code below is logical 640×360
+  c.imageSmoothingEnabled = true;
+  if (c.imageSmoothingQuality) c.imageSmoothingQuality = 'high';
   c.fillStyle = '#07080c'; c.fillRect(0, 0, VIEW_W, VIEW_H);
   if (G._cargrid) { drawCarGrid(c); return; }
-  if (G.state === 'title') { drawTitle(c); c.drawImage(SPR.scan, 0, 0); return; }
+  if (G.state === 'title') { drawTitle(c); milVignette(c); return; }
   const p = G.p;
   G._shx = G.shake > 0 ? rnd(-G.shake, G.shake) : 0;
   G._shy = G.shake > 0 ? rnd(-G.shake, G.shake) : 0;
@@ -2302,7 +2414,7 @@ function render() {
   c.imageSmoothingEnabled = true;
   const bx0 = clamp(wx0 - 24 | 0, 0, WORLD.W * TILE), by0 = clamp(wy0 - 24 | 0, 0, WORLD.H * TILE);
   const bx1 = clamp(wx1 + 24 | 0, 0, WORLD.W * TILE), by1 = clamp(wy1 + 24 | 0, 0, WORLD.H * TILE);
-  if (bx1 > bx0 && by1 > by0) c.drawImage(MILG.cv, bx0, by0, bx1 - bx0, by1 - by0, bx0, by0, bx1 - bx0, by1 - by0);
+  if (bx1 > bx0 && by1 > by0) c.drawImage(MILG.cv, bx0 * MIL_BK, by0 * MIL_BK, (bx1 - bx0) * MIL_BK, (by1 - by0) * MIL_BK, bx0, by0, bx1 - bx0, by1 - by0);
   // animated water sparkle along the visible coast
   for (let ty = minTY; ty <= maxTY; ty++) for (let tx = minTX; tx <= maxTX; tx++) {
     if (!milBorderTile(tx, ty) || milBorderKind(tx, ty) !== 'water') continue;
@@ -2452,7 +2564,7 @@ function render() {
   else { drawHUD(c); drawCrosshair(c); }
   if (TOUCH.on) drawTouchControls(c);
   if (G.fade) { const a = Math.sin(Math.PI * Math.min(1, G.fade.t / G.fade.dur)); c.fillStyle = 'rgba(4,2,8,' + (0.97 * a).toFixed(2) + ')'; c.fillRect(0, 0, VIEW_W, VIEW_H); if (a > 0.6) drawTextC(c, G.fade.label, VIEW_W / 2, 172, '#ff2a6d', 1); }
-  c.drawImage(SPR.scan, 0, 0);
+  milVignette(c);
 }
 
 function drawMilThing(c, it, p) {
@@ -2495,7 +2607,7 @@ function drawMilThing(c, it, p) {
       break;
     }
     case 'disp': { const s = proj(o.x, o.y, 0); drawCarMil(c, s.x, s.y, -0.9, CARD[o.id], 1.12); break; }
-    case 'bush': milBill(c, milBush(o.kind), o.x, o.y, 1, 1, false, true); break;
+    case 'bush': milBill(c, milBush(o.kind), o.x, o.y, 1, 1, false, true, 20, 16); break;
     case 'pick': {
       if (milIndoorVis(o.x, o.y) < 0.4) break;                            // loot indoors waits for the roof to lift
       const s = proj(o.x, o.y, 0), bob = Math.sin(G.rt * 4 + o.x) * 1.2;
