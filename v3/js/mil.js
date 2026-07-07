@@ -9,7 +9,7 @@
 const MIL_R = Math.SQRT1_2;             // 0.70710678 — pure 45° rotation
 const MIL_ZOOM = 2.25;                  // Commandos camera: close in — a block fills the screen
 const MIL_ZK = 1.0;                     // world-z px risen per world-px of height (pre-zoom)
-const MIL_SH = { x: -0.8, y: 1.0 };     // afternoon sun from the NE → long hard shadows sweep SW
+const MIL_SH = { x: 0.55, y: 0.42 };    // overcast key from the NW → soft, SHORT shadows to the SE (ref look)
 // texture densities: everything is drawn in logical coords but baked N× denser, then
 // smooth-sampled — this is what kills the chunky-pixel look. (Ground halves on small screens.)
 const MIL_BK = ((window.innerWidth || 1280) * (window.devicePixelRatio || 1)) >= 900 ? 2 : 1;
@@ -63,13 +63,13 @@ function milEnsure() {
   milBakeActors();
 }
 
-// outer frame (beyond the road grid): water on the W/S coast, badlands mountains on the N/E
-function milBorderTile(tx, ty) { return tx < 6 || ty < 6 || tx > 117 || ty > 117; }
-function milBorderKind(tx, ty) { return (tx < 6 || ty > 117) ? 'water' : 'mountain'; }
-function milMtnHeight(tx, ty) {
-  const n = Math.sin(tx * 0.7) * Math.cos(ty * 0.6) + Math.sin((tx + ty) * 0.35);
-  const edge = Math.max(0, 5 - Math.min(tx, ty, WORLD.W - 1 - tx, WORLD.H - 1 - ty));
-  return 40 + edge * 9 + (n + 2) * 14;
+// map frame: noisy sea on the W/S coast, rocky ridge on the N/E (masks live in world.js)
+function milBorderTile(tx, ty) { return WORLD.isWater(tx, ty) || WORLD.isRock(tx, ty); }
+function milBorderKind(tx, ty) { return WORLD.isWater(tx, ty) ? 'water' : 'mountain'; }
+function milRockHeight(tx, ty) {
+  const n = Math.sin(tx * 0.9) * Math.cos(ty * 0.7) + Math.sin((tx + ty) * 0.5);
+  const edge = Math.max(0, 4 - Math.min(ty, WORLD.W - 1 - tx));
+  return 8 + edge * 7 + (n + 2) * 8;
 }
 
 // ---- building list: real rects with per-building height / palette / linked roof fade ----
@@ -78,22 +78,24 @@ const MIL_WALLS = ['#8f8a7d', '#989181', '#8d8a92', '#83817e', '#9a8f7c', '#7f7d
 function milExtractBuildings() {
   MILG.bld = WORLD.bldgs.map(b => {
     const rng = mulberry32(b.x * 977 + b.y * 131);
-    const hgt = b.ent ? 26 + (rng() * 8 | 0) : 32 + (rng() * 5 | 0) * 6;      // shops stay low, blocks 32..56
+    // Commandos scale: one or two storeys, everything crowned with a pitched roof
+    const shed = b.theme === 'shed';
+    const hgt = shed ? 13 + (rng() * 3 | 0) : b.ent ? 19 + (rng() * 5 | 0) : 22 + (rng() * 7 | 0);
+    const rise = shed ? 6 + (rng() * 3 | 0) : 9 + (rng() * 6 | 0);
     const wall = b.ent ? milMix(MIL_WALLS[(rng() * 6) | 0], b.roof, 0.14) : MIL_WALLS[(rng() * 6) | 0];
     let roofIdx = null;
     if (b.ent) { const i = WORLD.roofs.findIndex(r => r.tx0 === b.x && r.ty0 === b.y); if (i >= 0) roofIdx = i; }
-    const shed = !b.ent && Math.min(b.w, b.h) <= 5 && rng() < 0.75;           // narrow industrial units get pitched roofs
     return {
-      b, hgt, wall, roofIdx, shed, rise: shed ? 7 + (rng() * 5 | 0) : 0,
+      b, hgt, wall, roofIdx, shed, gable: !shed, rise,
       x0: b.x * TILE, y0: b.y * TILE, x1: (b.x + b.w) * TILE, y1: (b.y + b.h) * TILE,
       seed: b.x * 7451 + b.y * 977,
-      fS: null, fE: null, roofCv: null, ant: null,
+      fS: null, fE: null, roofN: null, roofS: null, roofCv: null, ant: null,
     };
   });
-  // neon signs mount at the top of their building's facade
+  // sign boards mount above the ridge of their building
   for (const sg of WORLD.signs) {
     const bb = MILG.bld.find(B => sg.x >= B.x0 && sg.x <= B.x1 && sg.y >= B.y0 - 4 && sg.y <= B.y1 + 4);
-    sg._mh = bb ? bb.hgt : 26;
+    sg._mh = bb ? bb.hgt + (bb.rise || 0) : 24;
   }
 }
 function milBldAt(x, y) {
@@ -114,167 +116,226 @@ function milBakeGround() {
   c.imageSmoothingEnabled = true;
   const road = (tx, ty) => tx >= 0 && ty >= 0 && tx < W && ty < H && T[ty * W + tx] === WT.ROAD;
 
-  // ---- per-tile base coats (sunlit day materials) ----
+  // ============ ORGANIC TERRAIN — no grid, ever (the Commandos read) ============
+  const WPX = W * TILE, HPX = H * TILE;
+  const jit = (tx, ty, s, a) => (_n2(tx, ty, s) - 0.5) * a;
+
+  // ---- 1. packed-dirt country base: subtle tonal drift, heavy fine grain ----
+  c.fillStyle = '#8b7d63'; c.fillRect(0, 0, WPX, HPX);
   for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) {
-    const v = T[ty * W + tx], px = tx * TILE, py = ty * TILE;
-    const r = mulberry32(tx * 1733 + ty * 89);
-    if (milBorderTile(tx, ty)) {
-      if (milBorderKind(tx, ty) === 'water') {
-        const deep = Math.min(1, Math.max(6 - tx, ty - 117, 0) / 6 + 0.2);
-        c.fillStyle = milMix('#2e7086', '#123c4e', deep); c.fillRect(px, py, TILE, TILE);
-        if (r() < 0.6) { c.fillStyle = 'rgba(230,245,255,0.10)'; c.fillRect(px + r() * 12, py + r() * 14, 3 + r() * 5, 1); }
-        if (r() < 0.3) { c.fillStyle = 'rgba(10,40,55,0.25)'; c.beginPath(); c.ellipse(px + r() * 16, py + r() * 16, 5, 2, 0, 0, 7); c.fill(); }
-      } else {
-        c.fillStyle = ['#8a7a5e', '#93816a', '#7f7158'][r() * 3 | 0]; c.fillRect(px, py, TILE, TILE);
-        c.fillStyle = 'rgba(60,45,25,0.3)'; c.fillRect(px + r() * 11, py + r() * 11, 2 + r() * 4, 1 + r() * 2);
-        c.fillStyle = 'rgba(255,240,210,0.10)'; c.fillRect(px + r() * 12, py + r() * 12, 2 + r() * 2, 1);
-        if (r() < 0.15) { c.fillStyle = 'rgba(90,110,60,0.3)'; c.fillRect(px + r() * 14, py + r() * 14, 2, 1); } // scrub
-      }
-      continue;
+    const n = fbm2(tx / 7, ty / 7, 51);
+    c.fillStyle = milRgba(n < 0.5 ? '#584e3e' : '#a89a7c', Math.min(0.22, Math.abs(n - 0.5) * 0.55));
+    c.beginPath(); c.ellipse(tx * TILE + 8 + jit(tx, ty, 3, 10), ty * TILE + 8 + jit(tx, ty, 4, 10), 16 + jit(tx, ty, 5, 6), 13 + jit(tx, ty, 6, 6), _n2(tx, ty, 7) * 3, 0, 7); c.fill();
+  }
+  const rnd2 = mulberry32(909);
+  for (let k = 0; k < 26000; k++) {                                       // ground grain
+    const x = rnd2() * WPX, y = rnd2() * HPX;
+    c.fillStyle = rnd2() < 0.5 ? 'rgba(255,244,220,0.07)' : 'rgba(48,40,30,0.09)';
+    c.fillRect(x, y, 0.8 + rnd2() * 1.2, 0.8 + rnd2() * 0.8);
+  }
+  for (let k = 0; k < 2600; k++) {                                        // pebbles w/ light caps
+    const x = rnd2() * WPX, y = rnd2() * HPX, s = 1 + rnd2() * 1.6;
+    c.fillStyle = 'rgba(60,52,40,0.5)'; c.fillRect(x, y, s, s * 0.8);
+    c.fillStyle = 'rgba(240,230,205,0.35)'; c.fillRect(x, y, s * 0.7, s * 0.3);
+  }
+  for (let k = 0; k < 1100; k++) {                                        // faint scuffs
+    const x = rnd2() * WPX, y = rnd2() * HPX, a = rnd2() * 3.14, l = 3 + rnd2() * 7;
+    c.strokeStyle = rnd2() < 0.5 ? 'rgba(60,50,38,0.10)' : 'rgba(240,230,205,0.07)'; c.lineWidth = 0.8;
+    c.beginPath(); c.moveTo(x, y); c.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); c.stroke();
+  }
+
+  // ---- 2. grass meadows: low-contrast layered blobs + dense stubble ----
+  for (let pass = 0; pass < 2; pass++) for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) {
+    if (T[ty * W + tx] !== WT.PARK) continue;
+    const gx = tx * TILE + 8 + jit(tx, ty, 61 + pass, 12), gy = ty * TILE + 8 + jit(tx, ty, 62 + pass, 12);
+    c.fillStyle = pass === 0 ? '#4f5f38' : milRgba(_n2(tx, ty, 64) < 0.5 ? '#445430' : '#5c6c40', 0.65);
+    c.beginPath(); c.ellipse(gx, gy, (pass ? 11 : 15) + jit(tx, ty, 65 + pass, 5), (pass ? 9 : 12.5) + jit(tx, ty, 66 + pass, 5), _n2(tx, ty, 67) * 3, 0, 7); c.fill();
+  }
+  for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) {         // stubble + worn dirt breaks
+    if (T[ty * W + tx] !== WT.PARK) continue;
+    const r = mulberry32(tx * 733 + ty * 91);
+    for (let k = 0; k < 7; k++) {
+      c.fillStyle = r() < 0.5 ? 'rgba(130,148,84,0.30)' : 'rgba(34,44,22,0.28)';
+      c.fillRect(tx * TILE + r() * 15, ty * TILE + r() * 15, 0.9, 1.6 + r());
     }
-    if (v === WT.ROAD) {
-      c.fillStyle = '#4b4d52'; c.fillRect(px, py, TILE, TILE);
-      c.fillStyle = r() < 0.5 ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.09)';
-      c.beginPath(); c.ellipse(px + r() * 16, py + r() * 16, 5 + r() * 7, 3 + r() * 5, r() * 3, 0, 7); c.fill();
-      for (let k = 0; k < 4; k++) { c.fillStyle = r() < 0.5 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.12)'; c.fillRect(px + r() * 15, py + r() * 15, 1, 1); }
-      if (r() < 0.06) { c.fillStyle = 'rgba(20,20,26,0.4)'; c.beginPath(); c.ellipse(px + 8, py + 8, 4 + r() * 4, 3 + r() * 3, r() * 3, 0, 7); c.fill(); } // oil
-      if (r() < 0.08) { // asphalt crack
-        c.strokeStyle = 'rgba(18,18,22,0.5)'; c.lineWidth = 0.7; c.beginPath();
-        let cx2 = px + r() * 14, cy2 = py; c.moveTo(cx2, cy2);
-        for (let k = 0; k < 4; k++) { cx2 += (r() - 0.5) * 7; cy2 += 4 + r() * 3; c.lineTo(cx2, cy2); }
-        c.stroke(); c.lineWidth = 1;
+    if (r() < 0.10) { c.fillStyle = 'rgba(128,108,78,0.5)'; c.beginPath(); c.ellipse(tx * TILE + r() * 16, ty * TILE + r() * 16, 3 + r() * 3.5, 2 + r() * 2, r() * 3, 0, 7); c.fill(); }
+  }
+
+  // ---- 3. paved compound yards: aged concrete, tone-tinted + gravel grain ----
+  for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) {
+    if (T[ty * W + tx] !== WT.PLAZA) continue;
+    c.fillStyle = '#89816f';
+    c.beginPath(); c.ellipse(tx * TILE + 8 + jit(tx, ty, 72, 6), ty * TILE + 8 + jit(tx, ty, 73, 6), 14, 12, 0, 0, 7); c.fill();
+  }
+  for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) {
+    if (T[ty * W + tx] !== WT.PLAZA) continue;
+    const px2 = tx * TILE, py2 = ty * TILE;
+    const n = fbm2(tx / 5, ty / 5, 71);
+    c.fillStyle = milRgba(n < 0.5 ? '#5c5648' : '#a29a88', Math.min(0.16, Math.abs(n - 0.5) * 0.5));
+    c.beginPath(); c.ellipse(px2 + 8, py2 + 8, 13, 11, 0, 0, 7); c.fill();
+    const r = mulberry32(tx * 511 + ty * 77);
+    for (let k = 0; k < 6; k++) { c.fillStyle = r() < 0.5 ? 'rgba(250,242,222,0.06)' : 'rgba(50,46,38,0.09)'; c.fillRect(px2 + r() * 15, py2 + r() * 15, 1, 1); }
+    if (r() < 0.26) { c.strokeStyle = 'rgba(52,48,42,0.3)'; c.lineWidth = 0.7; c.beginPath(); const x0 = px2 + r() * 12, y0 = py2 + r() * 12; c.moveTo(x0, y0); c.lineTo(x0 + (r() - 0.3) * 14, y0 + r() * 10); c.stroke(); }
+    if (r() < 0.12) { c.fillStyle = 'rgba(70,62,50,0.25)'; c.beginPath(); c.ellipse(px2 + 8, py2 + 8, 4 + r() * 4, 3 + r() * 3, r() * 3, 0, 7); c.fill(); }
+    if (r() < 0.10) { c.fillStyle = 'rgba(118,150,84,0.3)'; c.fillRect(px2 + r() * 14, py2 + r() * 14, 1.4, 1); } // weeds
+  }
+
+  // ---- 4. interior floors get a neutral underlay (repainted by the interior pass) ----
+  for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) {
+    const v = T[ty * W + tx];
+    if (v === WT.FLOOR || v === WT.DOOR) { c.fillStyle = '#57503f'; c.fillRect(tx * TILE, ty * TILE, TILE, TILE); }
+  }
+
+  // ---- 5. sea: depth bands, chop, foam along the shore, wet sand ----
+  const landNear = (tx, ty, r) => {
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      const x = tx + dx, y = ty + dy;
+      if (x >= 0 && y >= 0 && x < W && y < H && !WORLD.isWater(x, y)) return true;
+    }
+    return false;
+  };
+  for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) {
+    if (!WORLD.isWater(tx, ty)) continue;
+    const d = landNear(tx, ty, 1) ? 0 : landNear(tx, ty, 3) ? 1 : 2;
+    c.fillStyle = ['#2e6a76', '#215562', '#173f4c'][d];
+    c.fillRect(tx * TILE - 2, ty * TILE - 2, TILE + 4, TILE + 4);
+  }
+  for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) {
+    if (!WORLD.isWater(tx, ty)) continue;
+    const r = mulberry32(tx * 397 + ty * 59);
+    for (let k = 0; k < 2; k++) { c.fillStyle = 'rgba(200,230,235,0.10)'; c.fillRect(tx * TILE + r() * 13, ty * TILE + r() * 14, 3 + r() * 5, 1); }
+    if (landNear(tx, ty, 1)) { c.fillStyle = 'rgba(235,245,240,0.35)'; for (let k = 0; k < 3; k++) c.fillRect(tx * TILE + r() * 13, ty * TILE + r() * 13, 2 + r() * 3, 1.2); }
+  }
+  for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) {         // wet-sand rim on land
+    if (WORLD.isWater(tx, ty) || !((WORLD.isWater(tx - 1, ty) || WORLD.isWater(tx + 1, ty) || WORLD.isWater(tx, ty - 1) || WORLD.isWater(tx, ty + 1)))) continue;
+    c.fillStyle = 'rgba(120,100,70,0.55)';
+    c.beginPath(); c.ellipse(tx * TILE + 8, ty * TILE + 8, 12, 10, 0, 0, 7); c.fill();
+  }
+
+  // ---- 6. rocky ridge ground (N/E frame) ----
+  for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) {
+    if (!WORLD.isRock(tx, ty)) continue;
+    const r = mulberry32(tx * 211 + ty * 83);
+    c.fillStyle = milMix('#7a6c52', r() < 0.5 ? '#8d8062' : '#5f5440', 0.4);
+    c.beginPath(); c.ellipse(tx * TILE + 8 + jit(tx, ty, 81, 8), ty * TILE + 8 + jit(tx, ty, 82, 8), 13, 11, 0, 0, 7); c.fill();
+    c.fillStyle = 'rgba(40,34,24,0.3)'; c.fillRect(tx * TILE + r() * 12, ty * TILE + r() * 12, 3 + r() * 4, 1.2);
+  }
+
+  // ---- 7. roads: stroked curves — soft margins, wheel ruts, worn paint ----
+  const strokePath = (pts, off, width, style) => {
+    c.strokeStyle = style; c.lineWidth = width; c.lineJoin = 'round'; c.lineCap = 'round';
+    c.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      let x = pts[i].x, y = pts[i].y;
+      if (off) {
+        const q = pts[Math.min(i + 1, pts.length - 1)], p0 = pts[Math.max(0, i - 1)];
+        const dx = q.x - p0.x, dy = q.y - p0.y, L = Math.hypot(dx, dy) || 1;
+        x -= dy / L * off; y += dx / L * off;
       }
-      if (r() < 0.1) { c.fillStyle = 'rgba(50,50,56,0.6)'; c.fillRect(px + r() * 8, py + r() * 12, 5 + r() * 6, 2); } // tar patch
-    } else if (v === WT.WALK) {
-      c.fillStyle = '#a09a8c'; c.fillRect(px, py, TILE, TILE);
-      c.fillStyle = milMix('#a09a8c', r() < 0.5 ? '#ffffff' : '#6a6458', 0.06); c.fillRect(px + 1, py + 1, 14, 14); // slab tone variance
-      c.fillStyle = 'rgba(60,58,50,0.5)'; c.fillRect(px, py, TILE, 1);
-      if ((tx & 1) === 0) c.fillRect(px, py, 1, TILE);
-      for (let k = 0; k < 3; k++) { c.fillStyle = r() < 0.5 ? 'rgba(255,255,255,0.06)' : 'rgba(70,64,54,0.25)'; c.fillRect(px + r() * 15, py + r() * 15, 1 + r() * 2, 1); }
-      if (r() < 0.08) { c.fillStyle = 'rgba(64,60,52,0.35)'; c.beginPath(); c.ellipse(px + 8, py + 9, 5, 3, 0, 0, 7); c.fill(); } // stain
-      if (r() < 0.05) { c.fillStyle = 'rgba(30,30,34,0.5)'; c.beginPath(); c.arc(px + 8, py + 8, 2.6, 0, 7); c.fill(); c.strokeStyle = 'rgba(255,255,255,0.15)'; c.lineWidth = 0.6; c.beginPath(); c.arc(px + 8, py + 8, 2.6, 0, 7); c.stroke(); } // manhole
-    } else if (v === WT.PLAZA) {
-      c.fillStyle = '#8e8a80'; c.fillRect(px, py, TILE, TILE);
-      c.fillStyle = milMix('#8e8a80', r() < 0.5 ? '#ffffff' : '#5e5a52', 0.05); c.fillRect(px, py, 8, 8); c.fillRect(px + 8, py + 8, 8, 8);
-      c.fillStyle = 'rgba(50,48,44,0.4)';
-      c.fillRect(px, py, TILE, 1); c.fillRect(px, py + 8, TILE, 1); c.fillRect(px, py, 1, TILE); c.fillRect(px + 8, py, 1, TILE);
-      c.fillStyle = 'rgba(255,255,255,0.05)'; c.fillRect(px + r() * 12, py + r() * 12, 3, 1);
-      if (r() < 0.05) { c.fillStyle = '#5e5a54'; c.fillRect(px + 4, py + 4, 8, 8); c.fillStyle = 'rgba(20,20,24,0.5)'; for (let g = 0; g < 4; g++) c.fillRect(px + 5, py + 5 + g * 2, 6, 1); } // grate
-    } else if (v === WT.PARK) {
-      c.fillStyle = '#5d7a44'; c.fillRect(px, py, TILE, TILE);
-      c.fillStyle = (tx + ty) % 2 ? 'rgba(255,255,220,0.04)' : 'rgba(20,40,10,0.05)'; c.fillRect(px, py, TILE, TILE); // mow bands
-      for (let k = 0; k < 7; k++) { c.fillStyle = r() < 0.5 ? '#6d8a50' : '#4a6636'; c.fillRect(px + r() * 15, py + r() * 15, 1 + (r() < 0.3 ? 1 : 0), 1); }
-      if (r() < 0.18) { c.fillStyle = 'rgba(122,100,70,0.5)'; c.beginPath(); c.ellipse(px + r() * 16, py + r() * 16, 3 + r() * 4, 2 + r() * 2, 0, 0, 7); c.fill(); } // dirt patch
-    } else if (v === WT.FLOOR || v === WT.DOOR) {
-      c.fillStyle = '#4a4640'; c.fillRect(px, py, TILE, TILE);
-    } else { // city BLDG footprint — a concrete pad, seen only through ghosted walls
-      c.fillStyle = '#716d63'; c.fillRect(px, py, TILE, TILE);
-      c.fillStyle = 'rgba(0,0,0,0.08)'; if ((tx + ty) & 1) c.fillRect(px, py, TILE, TILE);
+      i ? c.lineTo(x, y) : c.moveTo(x, y);
+    }
+    c.stroke();
+  };
+  for (const rd of WORLD.roads) {
+    const asphalt = rd.kind === 'asphalt';
+    strokePath(rd.pts, 0, rd.w + 9, 'rgba(96,86,66,0.45)');               // dusty verge blending into the dirt
+    strokePath(rd.pts, 0, rd.w + 3, asphalt ? '#5a574f' : '#84796a');
+    strokePath(rd.pts, 0, rd.w - 3, asphalt ? '#514e48' : '#8d8272');
+    strokePath(rd.pts, 0, rd.w * 0.42, asphalt ? '#565349' : '#948a7a');  // crowned centre
+    strokePath(rd.pts, rd.w * 0.24, 2.6, asphalt ? 'rgba(40,38,34,0.5)' : 'rgba(96,84,66,0.75)');  // wheel ruts
+    strokePath(rd.pts, -rd.w * 0.24, 2.6, asphalt ? 'rgba(40,38,34,0.5)' : 'rgba(96,84,66,0.75)');
+    const r = mulberry32(rd.pts.length * 17);
+    for (const p of rd.pts) {                                             // potholes / patches / mud
+      if (r() < 0.08) { c.fillStyle = 'rgba(48,42,34,0.5)'; c.beginPath(); c.ellipse(p.x + (r() - 0.5) * rd.w * 0.7, p.y + (r() - 0.5) * rd.w * 0.7, 2.5 + r() * 3, 1.8 + r() * 2, r() * 3, 0, 7); c.fill(); }
+      if (asphalt && r() < 0.05) { c.fillStyle = 'rgba(80,76,70,0.7)'; c.fillRect(p.x - 4, p.y - 2.4, 8 + r() * 5, 5); }
+    }
+    if (asphalt) {                                                        // ghost of a centre line
+      for (let i = 4; i < rd.pts.length - 4; i += 3) {
+        if (r() < 0.35) continue;
+        const p = rd.pts[i], q = rd.pts[i + 1];
+        const dx = q.x - p.x, dy = q.y - p.y, L = Math.hypot(dx, dy) || 1;
+        c.strokeStyle = 'rgba(214,206,178,0.30)'; c.lineWidth = 1.1;
+        c.beginPath(); c.moveTo(p.x, p.y); c.lineTo(p.x + dx / L * 6, p.y + dy / L * 6); c.stroke();
+      }
     }
   }
 
-  // ---- road paint: worn centre lines, lane dashes, crossings, gutters ----
-  const lo = RD[0], hi = RD[RD.length - 1] + 3;
-  const inRoadSpan = p => RD.some(rr => p >= rr && p < rr + 4);
-  const wear = mulberry32(4242);
-  for (const rr of RD) {
-    const m = (rr + 2) * TILE;
-    for (let p = lo * TILE; p < (hi + 1) * TILE; p += 4) {
-      if (inRoadSpan(Math.floor(p / TILE))) continue;
-      if (wear() > 0.12) { c.fillStyle = 'rgba(196,168,72,0.75)'; c.fillRect(m - 2, p, 1.2, 3); c.fillRect(m + 1, p, 1.2, 3); }
-      if (wear() > 0.12) { c.fillStyle = 'rgba(196,168,72,0.75)'; c.fillRect(p, m - 2, 3, 1.2); c.fillRect(p, m + 1, 3, 1.2); }
-      if ((p >> 2) % 4 === 0 && wear() > 0.18) {
-        c.fillStyle = 'rgba(232,232,224,0.6)';
-        c.fillRect(m - 18, p, 1.2, 8); c.fillRect(m + 17, p, 1.2, 8);
-        c.fillRect(p, m - 18, 8, 1.2); c.fillRect(p, m + 17, 8, 1.2);
-      }
-    }
-    // gutter shade lines along both road edges
-    c.fillStyle = 'rgba(30,30,34,0.35)';
-    c.fillRect(rr * TILE, lo * TILE, 1.5, (hi - lo + 1) * TILE); c.fillRect((rr + 4) * TILE - 1.5, lo * TILE, 1.5, (hi - lo + 1) * TILE);
-    c.fillRect(lo * TILE, rr * TILE, (hi - lo + 1) * TILE, 1.5); c.fillRect(lo * TILE, (rr + 4) * TILE - 1.5, (hi - lo + 1) * TILE, 1.5);
-  }
-  for (const vx of RD) for (const hy of RD) {                      // zebra crossings, sun-worn
-    const x0 = vx * TILE, y0 = hy * TILE, w4 = 4 * TILE;
-    for (let s = 3; s < w4 - 3; s += 6) {
-      c.fillStyle = 'rgba(228,228,220,' + (0.35 + wear() * 0.3).toFixed(2) + ')';
-      c.fillRect(x0 + s, y0 - 9, 3.4, 7); c.fillRect(x0 + s, y0 + w4 + 2, 3.4, 7);
-      c.fillRect(x0 - 9, y0 + s, 7, 3.4); c.fillRect(x0 + w4 + 2, y0 + s, 7, 3.4);
+  // ---- 8. crop fields: furrow rows like the refs' farmland ----
+  for (const f of WORLD.fields) {
+    c.fillStyle = 'rgba(96,80,58,0.6)'; c.fillRect(f.x - 2, f.y - 2, f.w + 4, f.h + 4);
+    for (let k = 0; k < (f.dir ? f.w : f.h); k += 5) {
+      c.fillStyle = '#6e5c42'; f.dir ? c.fillRect(f.x + k, f.y, 2.6, f.h) : c.fillRect(f.x, f.y + k, f.w, 2.6);
+      c.fillStyle = 'rgba(255,240,214,0.14)'; f.dir ? c.fillRect(f.x + k + 2.6, f.y, 1, f.h) : c.fillRect(f.x, f.y + k + 2.6, f.w, 1);
+      c.fillStyle = 'rgba(90,120,60,0.5)';
+      const r = mulberry32(f.x + k);
+      for (let s = 4; s < (f.dir ? f.h : f.w) - 4; s += 4 + r() * 3) f.dir ? c.fillRect(f.x + k + 0.6, f.y + s, 1.3, 1.6) : c.fillRect(f.x + s, f.y + k + 0.6, 1.6, 1.3);
     }
   }
 
-  // ---- curbs: lit stone edge wherever sidewalk meets road ----
-  for (let ty = 1; ty < H - 1; ty++) for (let tx = 1; tx < W - 1; tx++) {
-    if (T[ty * W + tx] !== WT.WALK) continue;
-    const px = tx * TILE, py = ty * TILE;
-    c.fillStyle = '#c3bcac';
-    if (road(tx, ty + 1)) { c.fillRect(px, py + TILE - 2, TILE, 2); c.fillStyle = 'rgba(20,20,24,0.4)'; c.fillRect(px, py + TILE, TILE, 1.4); c.fillStyle = '#c3bcac'; }
-    if (road(tx, ty - 1)) c.fillRect(px, py, TILE, 2);
-    if (road(tx + 1, ty)) { c.fillRect(px + TILE - 2, py, 2, TILE); c.fillStyle = 'rgba(20,20,24,0.4)'; c.fillRect(px + TILE, py, 1.4, TILE); c.fillStyle = '#c3bcac'; }
-    if (road(tx - 1, ty)) c.fillRect(px, py, 2, TILE);
-  }
-
-  // ---- BAKED LONG SHADOWS (the Commandos signature): hard, cool, sweeping SW ----
-  c.fillStyle = 'rgba(22,26,52,0.42)';
-  for (const B of MILG.bld) {
-    const hh = B.hgt + (B.rise || 0), dx = hh * MIL_SH.x, dy = hh * MIL_SH.y;
-    c.beginPath();     // convex hull of footprint ∪ footprint+offset, offset pointing SW
-    c.moveTo(B.x0, B.y0); c.lineTo(B.x1, B.y0); c.lineTo(B.x1, B.y1);
-    c.lineTo(B.x1 + dx, B.y1 + dy); c.lineTo(B.x0 + dx, B.y1 + dy); c.lineTo(B.x0 + dx, B.y0 + dy);
+  // ---- 9. SOFT SHADOW PASS (short SE, two offsets for a blurred edge) ----
+  const shadowPoly = (x0, y0, x1, y1, hh, a) => {
+    const dx = hh * MIL_SH.x * a, dy = hh * MIL_SH.y * a;
+    c.beginPath();
+    c.moveTo(x0, y0); c.lineTo(x1, y0); c.lineTo(x1 + dx, y0 + dy);
+    c.lineTo(x1 + dx, y1 + dy); c.lineTo(x0 + dx, y1 + dy); c.lineTo(x0, y1);
     c.closePath(); c.fill();
+  };
+  for (const soft of [1, 0.55]) {
+    c.fillStyle = 'rgba(34,32,44,0.16)';
+    for (const B of MILG.bld) shadowPoly(B.x0, B.y0, B.x1, B.y1, B.hgt + (B.rise || 0), soft);
+    for (const wl of WORLD.walls) shadowPoly(wl.x0, wl.y0, wl.x1, wl.y1, wl.h, soft);
+    for (const tr of WORLD.trees) { c.beginPath(); c.ellipse(tr.x + 11 * MIL_SH.x * soft, tr.y + 11 * MIL_SH.y * soft, tr.r * 1.05, tr.r * 0.8, 0, 0, 7); c.fill(); }
+    for (const pr of WORLD.props) { c.beginPath(); c.ellipse(pr.x + 7 * MIL_SH.x * soft, pr.y + 7 * MIL_SH.y * soft, pr.kind === 'container' ? 17 : 9, pr.kind === 'container' ? 10 : 6, 0, 0, 7); c.fill(); }
+    for (const wk of WORLD.wrecks) { c.beginPath(); c.ellipse(wk.x + 5 * MIL_SH.x * soft, wk.y + 5 * MIL_SH.y * soft, 11, 8, wk.a, 0, 7); c.fill(); }
   }
-  for (const tr of WORLD.trees) { c.beginPath(); c.ellipse(tr.x + 9 * MIL_SH.x, tr.y + 9 * MIL_SH.y, tr.r * 1.05, tr.r * 0.8, -0.6, 0, 7); c.fill(); }
-  for (const wk of WORLD.wrecks) { c.beginPath(); c.ellipse(wk.x + 5 * MIL_SH.x, wk.y + 5 * MIL_SH.y, 11, 8, wk.a, 0, 7); c.fill(); }
-  for (const L of WORLD.lights) { // lamp post shadows — long thin strokes
+  c.fillStyle = 'rgba(34,32,44,0.22)';
+  for (const L of WORLD.lights) {                                         // lamp pole shadows
     c.save(); c.translate(L.x, L.y); c.rotate(Math.atan2(MIL_SH.y, MIL_SH.x));
-    c.fillRect(0, -0.8, 30, 1.6); c.beginPath(); c.ellipse(31, 0, 2.6, 1.5, 0, 0, 7); c.fill();
+    c.fillRect(0, -0.7, 15, 1.4); c.beginPath(); c.ellipse(15.6, 0, 2, 1.2, 0, 0, 7); c.fill();
     c.restore();
   }
-  // contact AO hugging every facade base (sun side gets the crisp line)
-  c.fillStyle = 'rgba(24,24,32,0.45)';
-  for (const B of MILG.bld) { c.fillRect(B.x0, B.y1, B.x1 - B.x0 + 2, 2); c.fillRect(B.x1, B.y0, 2, B.y1 - B.y0 + 2); }
-
-  // ---- puddles: sky mirrors on the asphalt ----
-  for (const p of WORLD.puddles) {
-    c.fillStyle = 'rgba(30,34,40,0.5)'; c.beginPath(); c.ellipse(p.x, p.y + 0.6, p.w / 2 + 0.6, p.h / 2 + 0.5, 0, 0, 7); c.fill();
-    c.fillStyle = '#96aebc'; c.beginPath(); c.ellipse(p.x, p.y, p.w / 2, p.h / 2, 0, 0, 7); c.fill();
-    c.fillStyle = 'rgba(240,250,255,0.5)'; c.beginPath(); c.ellipse(p.x - p.w * 0.12, p.y - p.h * 0.1, p.w / 3.4, p.h / 4, 0, 0, 7); c.fill();
+  for (const fs of WORLD.fences) {                                        // faint fence lines
+    c.strokeStyle = 'rgba(34,32,44,0.13)'; c.lineWidth = 2;
+    c.beginPath(); c.moveTo(fs.x0 + 2.4, fs.y0 + 2), c.lineTo(fs.x1 + 2.4, fs.y1 + 2); c.stroke();
   }
+  // contact AO hugging bases
+  c.fillStyle = 'rgba(30,28,26,0.4)';
+  for (const B of MILG.bld) { c.fillRect(B.x0, B.y1, B.x1 - B.x0 + 1.4, 1.6); c.fillRect(B.x1, B.y0, 1.6, B.y1 - B.y0 + 1.4); }
+  for (const wl of WORLD.walls) { c.fillRect(wl.x0, wl.y1, wl.x1 - wl.x0 + 1, 1.2); c.fillRect(wl.x1, wl.y0, 1.2, wl.y1 - wl.y0 + 1); }
 
-  // ---- trees: sun-struck layered canopies ----
-  for (const tr of WORLD.trees) {
-    const rng2 = mulberry32((tr.x * 31 + tr.y * 7) | 0);
-    c.fillStyle = '#2c421e'; c.beginPath(); c.ellipse(tr.x, tr.y, tr.r, tr.r * 0.85, 0, 0, 7); c.fill();
-    for (let k = 0; k < 7; k++) {
-      c.fillStyle = milMix('#48682e', '#5f8038', rng2());
-      c.beginPath(); c.ellipse(tr.x + (rng2() - 0.5) * tr.r, tr.y + (rng2() - 0.5) * tr.r * 0.8, tr.r * 0.36, tr.r * 0.3, rng2() * 3, 0, 7); c.fill();
-    }
-    c.fillStyle = 'rgba(235,255,200,0.35)'; // NE sun catch
-    c.beginPath(); c.ellipse(tr.x + tr.r * 0.3, tr.y - tr.r * 0.3, tr.r * 0.34, tr.r * 0.24, 0.5, 0, 7); c.fill();
-    c.fillStyle = 'rgba(14,24,10,0.4)';
-    c.beginPath(); c.ellipse(tr.x - tr.r * 0.35, tr.y + tr.r * 0.3, tr.r * 0.4, tr.r * 0.26, 0.5, 0, 7); c.fill();
-  }
-  // ---- wrecks: sun-bleached rusted shells ----
+  // ---- 10. wrecks (baked flat shells) + lamp bases + puddles ----
   for (const wk of WORLD.wrecks) {
     c.save(); c.translate(wk.x, wk.y); c.rotate(wk.a);
-    c.fillStyle = '#7a6a56'; milRR(c, -6, -10, 12, 20, 3); c.fill();
-    c.fillStyle = '#96876e'; c.fillRect(-5, -9, 10, 4);
-    c.fillStyle = '#8a5a34'; c.fillRect(-5, -3, 4, 6); c.fillRect(2, 3, 3, 5);
-    c.fillStyle = '#23282e'; c.fillRect(-4, -5, 8, 4); c.fillRect(-4, 5, 8, 3);
-    c.fillStyle = 'rgba(0,0,0,0.25)'; c.fillRect(-6, 8, 12, 2);
+    c.fillStyle = '#75675a'; milRR(c, -6, -10, 12, 20, 3); c.fill();
+    c.fillStyle = '#8d7f6c'; c.fillRect(-5, -9, 10, 4);
+    c.fillStyle = '#7d4c2c'; c.fillRect(-5, -3, 4, 6); c.fillRect(2, 3, 3, 5);
+    c.fillStyle = '#252a30'; c.fillRect(-4, -5, 8, 4); c.fillRect(-4, 5, 8, 3);
     c.restore();
   }
-
-  // ---- lamp bases (poles draw per-frame, depth-sorted) ----
   for (const L of WORLD.lights) {
-    c.fillStyle = '#4a4d55'; c.beginPath(); c.ellipse(L.x, L.y, 2, 1.4, 0, 0, 7); c.fill();
-    c.fillStyle = 'rgba(255,255,255,0.2)'; c.fillRect(L.x - 1.4, L.y - 0.8, 2.8, 0.7);
+    c.fillStyle = '#5c584c'; c.beginPath(); c.ellipse(L.x, L.y, 2.2, 1.5, 0, 0, 7); c.fill();
+    c.fillStyle = 'rgba(255,255,255,0.18)'; c.fillRect(L.x - 1.4, L.y - 0.8, 2.8, 0.7);
+  }
+  for (const p of WORLD.puddles) {
+    c.fillStyle = 'rgba(50,48,44,0.5)'; c.beginPath(); c.ellipse(p.x, p.y + 0.5, p.w / 2 + 0.6, p.h / 2 + 0.5, 0, 0, 7); c.fill();
+    c.fillStyle = '#8ba4b0'; c.beginPath(); c.ellipse(p.x, p.y, p.w / 2, p.h / 2, 0, 0, 7); c.fill();
+    c.fillStyle = 'rgba(235,244,248,0.4)'; c.beginPath(); c.ellipse(p.x - p.w * 0.12, p.y - p.h * 0.1, p.w / 3.6, p.h / 4.2, 0, 0, 7); c.fill();
   }
 
-  // ---- realistic interiors for enterable buildings ----
-  for (const B of MILG.bld) if (B.b.ent) milBakeInterior(c, B);
+  // ---- 11. worn footpath from each compound gate toward the road ----
+  for (const B of MILG.bld) {
+    if (!B.b.ent || !B.b.doors) continue;
+    for (const dtx of B.b.doors) {
+      const dx = dtx * TILE + 8;
+      c.strokeStyle = 'rgba(150,132,104,0.4)'; c.lineWidth = 7; c.lineCap = 'round';
+      c.beginPath(); c.moveTo(dx, B.y1 + 2); c.lineTo(dx + 4, B.y1 + 26); c.stroke();
+      c.strokeStyle = 'rgba(110,96,74,0.35)'; c.lineWidth = 3;
+      c.beginPath(); c.moveTo(dx - 1, B.y1 + 2); c.lineTo(dx + 3, B.y1 + 26); c.stroke();
+    }
+  }
 
-  // ---- door thresholds ----
+  // ---- 12. interiors + thresholds ----
+  for (const B of MILG.bld) if (B.b.ent) milBakeInterior(c, B);
   for (const B of MILG.bld) {
     if (!B.b.ent || !B.b.doors) continue;
     for (const dtx of B.b.doors) {
@@ -283,9 +344,6 @@ function milBakeGround() {
       c.fillStyle = 'rgba(0,0,0,0.22)'; c.fillRect(dx + 2, B.y1 - 3, 12, 1.2);
     }
   }
-
-  // ---- warm afternoon grade over the whole plan ----
-  c.fillStyle = 'rgba(255,214,150,0.05)'; c.fillRect(0, 0, W * TILE, H * TILE);
 }
 
 // interiors mirror _bakeInterior's furniture geometry (WORLD.obst rects), realistic coats
@@ -387,19 +445,70 @@ function milBakeInterior(c, B) {
 // =====================================================================
 function milBakeBuildings() {
   for (const B of MILG.bld) {
-    B.fS = milFacade(B.x1 - B.x0, B.hgt, B, 's');
-    B.fE = milFacade(B.y1 - B.y0, B.hgt, B, 'e');
-    B.roofCv = milRoof(B);
+    B.fS = milFacade(B.x1 - B.x0, B.hgt, B, 's', 0);
+    B.fE = milFacade(B.y1 - B.y0, B.hgt, B, 'e', B.gable ? B.rise : 0);  // gable ends carry a pediment
+    if (B.gable) { B.roofN = milRoofHalf(B, 0); B.roofS = milRoofHalf(B, 1); }
+    else B.roofCv = milRoof(B);
   }
 }
 
-function milFacade(len, hgt, B, dir) {
-  const b = B.b, cv = mkCanvas(Math.ceil(len * MIL_FK), Math.ceil(hgt * MIL_FK)), c = cv.getContext('2d');
+// one slope of a gabled roof (ridge runs along x). Terracotta or slate courses along the ridge.
+function milRoofHalf(B, south) {
+  const w = B.x1 - B.x0, hh = Math.max(2, (B.y1 - B.y0) / 2);
+  const cv = mkCanvas(Math.ceil(w * MIL_FK), Math.ceil(hh * MIL_FK)), c = cv.getContext('2d');
+  c.setTransform(MIL_FK, 0, 0, MIL_FK, 0, 0);
+  const rng = mulberry32(B.seed + (south ? 501 : 149));
+  const slate = B.b.roof.includes('60') || B.b.roof === '#65605a';
+  const base = milMix(B.b.roof, south ? '#e8d0a8' : '#3c3a44', south ? 0.16 : 0.22); // lit slope vs sky slope
+  c.fillStyle = base; c.fillRect(0, 0, w, hh);
+  // tile courses parallel to the ridge
+  const step = slate ? 2.6 : 2.2;
+  for (let v = 0; v < hh; v += step) {
+    c.fillStyle = 'rgba(40,26,20,0.30)'; c.fillRect(0, south ? v : hh - v - 1, w, 0.9);
+    c.fillStyle = 'rgba(255,240,220,0.10)'; c.fillRect(0, (south ? v : hh - v - 1) + 1, w, 0.7);
+    for (let u = ((v * 7) % step); u < w; u += 4.6) {                     // staggered tile joints
+      c.fillStyle = 'rgba(40,26,20,0.16)'; c.fillRect(u, south ? v : hh - v - 1, 0.7, step);
+    }
+  }
+  for (let k = 0; k < w / 3; k++) {                                       // weathered / swapped tiles
+    c.fillStyle = milMix(base, rng() < 0.5 ? '#ffffff' : '#301c14', 0.14 + rng() * 0.1);
+    c.fillRect(rng() * w, rng() * hh, 2 + rng() * 3, 1.6);
+  }
+  c.fillStyle = 'rgba(90,110,70,0.18)';                                   // moss creep near the eave
+  for (let k = 0; k < w / 6; k++) c.beginPath(), c.ellipse(rng() * w, (south ? hh : 0) + (south ? -1 : 1) * rng() * 3, 2 + rng() * 3, 1.2, 0, 0, 7), c.fill();
+  // ridge cap on the ridge-side edge, drip edge on the eave side
+  c.fillStyle = milMix(base, '#2a2018', 0.35); c.fillRect(0, south ? 0 : hh - 1.6, w, 1.6);
+  c.fillStyle = 'rgba(255,244,225,0.35)'; c.fillRect(0, south ? 1.6 : hh - 2.2, w, 0.7);
+  c.fillStyle = 'rgba(20,16,12,0.4)'; c.fillRect(0, south ? hh - 1 : 0, w, 1);
+  // chimney with its little cast shadow (south half only, so it reads against the sky slope)
+  if (south && w > 60 && rng() < 0.8) {
+    const cx2 = 8 + rng() * (w - 18);
+    c.fillStyle = 'rgba(20,16,12,0.35)'; c.fillRect(cx2 - 2.4, 2.2, 6.5, 4.6);
+    c.fillStyle = '#7a5844'; c.fillRect(cx2, 1, 5, 4.5);
+    c.fillStyle = '#94705a'; c.fillRect(cx2, 1, 5, 1.2);
+    c.fillStyle = '#3a3026'; c.fillRect(cx2 + 0.8, 0, 1.4, 1.4); c.fillRect(cx2 + 2.9, 0, 1.4, 1.4);
+  }
+  return cv;
+}
+
+function milFacade(len, hgt, B, dir, padTop) {
+  padTop = padTop || 0;
+  const b = B.b, cv = mkCanvas(Math.ceil(len * MIL_FK), Math.ceil((hgt + padTop) * MIL_FK)), c = cv.getContext('2d');
   c.setTransform(MIL_FK, 0, 0, MIL_FK, 0, 0);
   const rng = mulberry32(B.seed + (dir === 's' ? 5 : 811));
-  // sun model: east faces catch the warm afternoon light, south faces sit in cool shade
+  // overcast sun model: east faces a touch warmer, south faces a touch cooler
   const lit = dir === 'e';
-  const wall = lit ? milMix(B.wall, '#ffe8bc', 0.28) : milMix(B.wall, '#3c4460', 0.38);
+  const wall = lit ? milMix(B.wall, '#f4e2c4', 0.16) : milMix(B.wall, '#4c5468', 0.22);
+  if (padTop) {                                                            // gable pediment above the wall plate
+    c.fillStyle = milMix(wall, '#000000', 0.10);
+    c.beginPath(); c.moveTo(-0.5, padTop + 0.5); c.lineTo(len / 2, 0); c.lineTo(len + 0.5, padTop + 0.5); c.closePath(); c.fill();
+    c.strokeStyle = 'rgba(56,42,30,0.55)'; c.lineWidth = 1;                // bargeboards
+    c.beginPath(); c.moveTo(0, padTop); c.lineTo(len / 2, 0.5); c.lineTo(len, padTop); c.stroke();
+    c.fillStyle = 'rgba(28,24,20,0.6)';                                    // attic vent
+    c.beginPath(); c.arc(len / 2, padTop * 0.6, Math.min(2.2, padTop * 0.24), 0, 7); c.fill();
+    c.lineWidth = 1;
+  }
+  c.translate(0, padTop);                                                  // wall paints in its own frame below
   const g = c.createLinearGradient(0, 0, 0, hgt);
   g.addColorStop(0, milMix(wall, '#ffffff', 0.12)); g.addColorStop(0.3, wall); g.addColorStop(1, milMix(wall, '#2a2c38', 0.22));
   c.fillStyle = g; c.fillRect(0, 0, len, hgt);
@@ -468,12 +577,10 @@ function milFacade(len, hgt, B, dir) {
       c.fillStyle = 'rgba(0,0,0,0.28)'; for (let ry = gy0 + 3; ry < hgt - 1; ry += 2) c.fillRect(rx, ry, 18, 0.8);
       c.fillStyle = 'rgba(0,0,0,0.4)'; c.fillRect(rx - 1, gy0 + 2, 1, gf - 2); c.fillRect(rx + 18, gy0 + 2, 1, gf - 2);
     }
-    if (rng() < 0.55) { // graffiti tag — pops in daylight
-      const tag = NEON[rng() * NEON.length | 0], tx2 = 3 + rng() * Math.max(1, len - 20);
-      c.strokeStyle = milRgba(tag, 0.65); c.lineWidth = 2.2;
-      c.beginPath(); c.moveTo(tx2, gy0 + 9); c.quadraticCurveTo(tx2 + 5, gy0 + 3, tx2 + 9, gy0 + 8); c.quadraticCurveTo(tx2 + 13, gy0 + 11, tx2 + 16, gy0 + 6); c.stroke();
-      c.strokeStyle = milRgba('#ffffff', 0.25); c.lineWidth = 0.8;
-      c.beginPath(); c.moveTo(tx2, gy0 + 8.4); c.quadraticCurveTo(tx2 + 5, gy0 + 2.4, tx2 + 9, gy0 + 7.4); c.stroke();
+    if (rng() < 0.45) { // small gang tag near the wall base
+      const tag = NEON[rng() * NEON.length | 0], tx2 = 3 + rng() * Math.max(1, len - 14), gy2 = hgt - 7;
+      c.strokeStyle = milRgba(tag, 0.5); c.lineWidth = 1.3;
+      c.beginPath(); c.moveTo(tx2, gy2 + 4); c.quadraticCurveTo(tx2 + 3, gy2, tx2 + 5.5, gy2 + 3.4); c.quadraticCurveTo(tx2 + 8, gy2 + 5.4, tx2 + 10, gy2 + 2); c.stroke();
       c.lineWidth = 1;
     }
     c.fillStyle = 'rgba(0,0,0,0.3)'; for (let vx = 6; vx < len - 8; vx += 22) { if (rng() < 0.5) { c.fillRect(vx, gy0 + 4, 8, 5); c.fillStyle = 'rgba(255,255,255,0.14)'; c.fillRect(vx, gy0 + 4, 8, 1); c.fillStyle = 'rgba(0,0,0,0.3)'; } }
@@ -557,25 +664,34 @@ function milRoof(B) {
 // per-frame building draw: two slanted facades + rotated roof + antenna
 // =====================================================================
 function milDrawBuilding(c, B, alpha) {
-  const Z = MIL_ZOOM, zh = B.hgt * MIL_ZK * Z, RZ = MIL_R * Z;
-  const pS = proj(B.x0, B.y1, 0), pE = proj(B.x1, B.y0, 0);
+  const Z = MIL_ZOOM, zh = B.hgt * MIL_ZK * Z, rh = B.rise * MIL_ZK * Z, RZ = MIL_R * Z, ZKZ = MIL_ZK * Z;
+  const pS = proj(B.x0, B.y1, 0), pE = proj(B.x1, B.y0, 0), pN = proj(B.x0, B.y0, 0);
   if (alpha < 1) c.globalAlpha = alpha;
   // south face: runs along +x → screen dir (R, R); texture y maps straight down.
   // c.transform (not setTransform) so the hi-res base transform composes through.
   c.save();
-  c.transform(RZ / MIL_FK, RZ / MIL_FK, 0, MIL_ZK * Z / MIL_FK, pS.x, pS.y - zh);
+  c.transform(RZ / MIL_FK, RZ / MIL_FK, 0, ZKZ / MIL_FK, pS.x, pS.y - zh);
   c.drawImage(B.fS, 0, 0);
   c.restore();
-  // east face: runs along +y → screen dir (−R, R)
+  // east face — gable ends carry their pediment in the texture, so it starts higher
   c.save();
-  c.transform(-RZ / MIL_FK, RZ / MIL_FK, 0, MIL_ZK * Z / MIL_FK, pE.x, pE.y - zh);
+  c.transform(-RZ / MIL_FK, RZ / MIL_FK, 0, ZKZ / MIL_FK, pE.x, pE.y - zh - (B.gable ? rh : 0));
   c.drawImage(B.fE, 0, 0);
   c.restore();
-  if (B.shed) {
-    // mono-pitch roof: high at the north eave, dropping to the south — the plan texture
-    // shears up-screen along −y. East face gets a flat-shaded wedge under the sloped edge.
-    const rh = B.rise * MIL_ZK * Z, H = B.y1 - B.y0;
-    const pN = proj(B.x0, B.y0, 0);
+  if (B.gable) {
+    // pitched roof, ridge along x: two plan half-textures sheared toward/away from the ridge
+    const H2 = Math.max(2, (B.y1 - B.y0) / 2), pM = proj(B.x0, (B.y0 + B.y1) / 2, 0);
+    c.save();
+    c.transform(RZ / MIL_FK, RZ / MIL_FK, -RZ / MIL_FK, (RZ - rh / H2) / MIL_FK, pN.x, pN.y - zh);
+    c.drawImage(B.roofN, 0, 0);
+    c.restore();
+    c.save();
+    c.transform(RZ / MIL_FK, RZ / MIL_FK, -RZ / MIL_FK, (RZ + rh / H2) / MIL_FK, pM.x, pM.y - zh - rh);
+    c.drawImage(B.roofS, 0, 0);
+    c.restore();
+  } else {
+    // mono-pitch shed: high north eave dropping south; east face gets a flat wedge
+    const H = B.y1 - B.y0;
     c.save();
     c.transform(RZ / MIL_FK, RZ / MIL_FK, -RZ / MIL_FK, RZ / MIL_FK + rh / (H * MIL_FK), pN.x, pN.y - zh - rh);
     c.drawImage(B.roofCv, 0, 0);
@@ -585,20 +701,6 @@ function milDrawBuilding(c, B, alpha) {
     c.beginPath(); c.moveTo(eN.x, eN.y - zh); c.lineTo(eN.x, eN.y - zh - rh); c.lineTo(eS.x, eS.y - zh); c.closePath(); c.fill();
     c.strokeStyle = 'rgba(0,0,0,0.3)'; c.lineWidth = 1;
     c.beginPath(); c.moveTo(eN.x, eN.y - zh - rh); c.lineTo(eS.x, eS.y - zh); c.stroke();
-  } else {
-    // flat roof: plan-rotated, lifted by zh
-    c.save();
-    c.translate(G._ox + (G._shx || 0), G._oy + (G._shy || 0) - zh);
-    c.rotate(Math.PI / 4);
-    c.scale(Z, Z);
-    c.drawImage(B.roofCv, B.x0, B.y0, B.x1 - B.x0, B.y1 - B.y0);
-    c.restore();
-  }
-  // aircraft-warning lamp on the tall flats
-  if (B.ant && !B.shed) {
-    const a = proj(B.ant.x, B.ant.y, B.hgt);
-    c.fillStyle = '#3a3e46'; c.fillRect(a.x - 0.5 * Z, a.y - 6 * Z, Z, 6 * Z);
-    if ((G.frame / 40 | 0) % 2) { c.fillStyle = '#ff3344'; c.fillRect(a.x - Z, a.y - 7.5 * Z, 2 * Z, 2 * Z); }
   }
   c.globalAlpha = 1;
 }
@@ -756,15 +858,186 @@ function milBill(c, spr, x, y, alpha, scale, flip, shadow, sw, sh) {
 
 function milPh(a) { return Math.floor(a * 2) % 4; }   // 4-phase walk from the sim's anim counter
 
-// axis-aligned prism (crate / vend / mtn tile): plan square → rotated diamond + straight sides
-function milPrism(c, x0, y0, x1, y1, h, top, lt, dk, alpha) {
-  const zh = h * MIL_ZK;
+// axis-aligned prism (crate / vend / rock): plan square → rotated diamond + straight sides.
+// z0 lifts the whole box (stacked cargo). Heights are world-z; the camera zoom applies here.
+function milPrism(c, x0, y0, x1, y1, h, top, lt, dk, alpha, z0) {
+  const zh = h * MIL_ZK * MIL_ZOOM, zb = (z0 || 0) * MIL_ZK * MIL_ZOOM;
   const gN = proj(x0, y0, 0), gE = proj(x1, y0, 0), gS = proj(x1, y1, 0), gW = proj(x0, y1, 0);
   if (alpha != null && alpha < 1) c.globalAlpha = alpha;
-  c.fillStyle = dk; c.beginPath(); c.moveTo(gW.x, gW.y); c.lineTo(gS.x, gS.y); c.lineTo(gS.x, gS.y - zh); c.lineTo(gW.x, gW.y - zh); c.closePath(); c.fill();
-  c.fillStyle = lt; c.beginPath(); c.moveTo(gE.x, gE.y); c.lineTo(gS.x, gS.y); c.lineTo(gS.x, gS.y - zh); c.lineTo(gE.x, gE.y - zh); c.closePath(); c.fill();
-  c.fillStyle = top; c.beginPath(); c.moveTo(gN.x, gN.y - zh); c.lineTo(gE.x, gE.y - zh); c.lineTo(gS.x, gS.y - zh); c.lineTo(gW.x, gW.y - zh); c.closePath(); c.fill();
+  c.fillStyle = dk; c.beginPath(); c.moveTo(gW.x, gW.y - zb); c.lineTo(gS.x, gS.y - zb); c.lineTo(gS.x, gS.y - zb - zh); c.lineTo(gW.x, gW.y - zb - zh); c.closePath(); c.fill();
+  c.fillStyle = lt; c.beginPath(); c.moveTo(gE.x, gE.y - zb); c.lineTo(gS.x, gS.y - zb); c.lineTo(gS.x, gS.y - zb - zh); c.lineTo(gE.x, gE.y - zb - zh); c.closePath(); c.fill();
+  c.fillStyle = top; c.beginPath(); c.moveTo(gN.x, gN.y - zb - zh); c.lineTo(gE.x, gE.y - zb - zh); c.lineTo(gS.x, gS.y - zb - zh); c.lineTo(gW.x, gW.y - zb - zh); c.closePath(); c.fill();
   c.globalAlpha = 1;
+}
+
+// ============ Commandos prop kit (depth-sorted world objects) ============
+function milTreeCv(tr) {
+  if (tr._cv) return tr._cv;
+  const R = tr.r, w = R * 2.7, h = R * 2.2, S = 3;
+  const cv = mkCanvas(Math.ceil(w * S), Math.ceil(h * S)), c = cv.getContext('2d');
+  c.setTransform(S, 0, 0, S, 0, 0);
+  const rng = mulberry32((tr.x * 13 + tr.y * 7) | 0);
+  const base = milMix(tr.col || '#3c5426', '#22301a', 0.35), cx = w / 2, cy = h / 2;
+  c.fillStyle = milMix(base, '#0c1408', 0.55);                            // dark silhouette mass
+  c.beginPath(); c.ellipse(cx, cy, R * 1.2, R * 0.96, 0, 0, 7); c.fill();
+  for (let k = 0; k < 22; k++) {                                          // dense dark billows
+    const a = rng() * 7, d = rng() * R * 0.66;
+    const bx = cx + Math.cos(a) * d, by = cy + Math.sin(a) * d * 0.78;
+    c.fillStyle = milMix(base, rng() < 0.5 ? '#31421f' : '#1a2612', 0.4 + rng() * 0.3);
+    c.beginPath(); c.ellipse(bx, by, R * (0.26 + rng() * 0.18), R * (0.2 + rng() * 0.14), rng() * 3, 0, 7); c.fill();
+  }
+  for (let k = 0; k < 12; k++) {                                          // mid-tone leaf clusters
+    const a = rng() * 7, d = rng() * R * 0.5;
+    c.fillStyle = milRgba(milMix(base, '#55703a', 0.6), 0.6);
+    c.beginPath(); c.ellipse(cx + Math.cos(a) * d - R * 0.06, cy + Math.sin(a) * d * 0.7 - R * 0.1, R * 0.15, R * 0.1, rng() * 3, 0, 7); c.fill();
+  }
+  for (let k = 0; k < 7; k++) {                                           // small top-left sun flecks
+    c.fillStyle = 'rgba(168,190,110,0.28)';
+    c.beginPath(); c.ellipse(cx - R * 0.16 + (rng() - 0.5) * R * 0.6, cy - R * 0.3 + (rng() - 0.5) * R * 0.35, R * 0.09, R * 0.06, rng() * 3, 0, 7); c.fill();
+  }
+  c.fillStyle = 'rgba(6,10,4,0.4)';                                       // deep SE underside
+  c.beginPath(); c.ellipse(cx + R * 0.24, cy + R * 0.4, R * 0.6, R * 0.32, 0.2, 0, 7); c.fill();
+  tr._cv = cv; tr._w = w; tr._h = h;
+  return cv;
+}
+function milDrawTree(c, tr) {
+  const Z = MIL_ZOOM, b = proj(tr.x, tr.y, 0);
+  c.strokeStyle = '#3c3222'; c.lineWidth = 2 * Z;                          // trunk
+  c.beginPath(); c.moveTo(b.x, b.y); c.lineTo(b.x + 0.5 * Z, b.y - 7 * Z); c.stroke();
+  c.strokeStyle = 'rgba(255,240,210,0.18)'; c.lineWidth = 0.7 * Z;
+  c.beginPath(); c.moveTo(b.x - 0.6 * Z, b.y); c.lineTo(b.x, b.y - 7 * Z); c.stroke();
+  const cv = milTreeCv(tr), p = proj(tr.x, tr.y, 9 + tr.r * 0.4);
+  c.drawImage(cv, p.x - tr._w / 2 * Z, p.y - tr._h / 2 * Z, tr._w * Z, tr._h * Z);
+  c.lineWidth = 1;
+}
+
+function milDrawWall(c, wl) {
+  const Z = MIL_ZOOM, zh = wl.h * MIL_ZK * Z;
+  const gE = proj(wl.x1, wl.y0, 0), gS = proj(wl.x1, wl.y1, 0), gW = proj(wl.x0, wl.y1, 0), gN = proj(wl.x0, wl.y0, 0);
+  const stone = '#84816c';
+  // south + east faces, then the cap course
+  c.fillStyle = milMix(stone, '#3e4452', 0.30);
+  c.beginPath(); c.moveTo(gW.x, gW.y); c.lineTo(gS.x, gS.y); c.lineTo(gS.x, gS.y - zh); c.lineTo(gW.x, gW.y - zh); c.closePath(); c.fill();
+  c.fillStyle = milMix(stone, '#efe6c8', 0.14);
+  c.beginPath(); c.moveTo(gE.x, gE.y); c.lineTo(gS.x, gS.y); c.lineTo(gS.x, gS.y - zh); c.lineTo(gE.x, gE.y - zh); c.closePath(); c.fill();
+  c.fillStyle = milMix(stone, '#fff4d8', 0.08);
+  c.beginPath(); c.moveTo(gN.x, gN.y - zh); c.lineTo(gE.x, gE.y - zh); c.lineTo(gS.x, gS.y - zh); c.lineTo(gW.x, gW.y - zh); c.closePath(); c.fill();
+  // weathered cap: tone patches + coping joints across the top
+  const rngT = mulberry32((wl.seed | 0) + 5);
+  for (let k = 0; k < (wl.x1 - wl.x0 + wl.y1 - wl.y0) / 26; k++) {
+    const u = wl.x0 + rngT() * (wl.x1 - wl.x0), v = wl.y0 + rngT() * (wl.y1 - wl.y0), p = proj(u, v, wl.h);
+    c.fillStyle = rngT() < 0.5 ? 'rgba(60,58,48,0.22)' : 'rgba(250,244,224,0.14)';
+    c.beginPath(); c.ellipse(p.x, p.y, 4.5 * MIL_ZOOM, 2.2 * MIL_ZOOM, 0.4, 0, 7); c.fill();
+  }
+  // masonry joints + moss along the base
+  const rng = mulberry32(wl.seed | 0), Lx = wl.x1 - wl.x0, Ly = wl.y1 - wl.y0;
+  c.strokeStyle = 'rgba(44,42,36,0.35)'; c.lineWidth = 0.6 * Z;
+  if (Lx >= Ly) {
+    for (let u = wl.x0 + 7; u < wl.x1 - 2; u += 8) {
+      const p = proj(u, wl.y1, 0);
+      c.beginPath(); c.moveTo(p.x, p.y - zh * (0.2 + rng() * 0.15)); c.lineTo(p.x, p.y - zh * (0.75 + rng() * 0.2)); c.stroke();
+    }
+    const m0 = proj(wl.x0, wl.y1, 0), m1 = proj(wl.x1, wl.y1, 0);
+    c.beginPath(); c.moveTo(m0.x, m0.y - zh * 0.5); c.lineTo(m1.x, m1.y - zh * 0.5); c.stroke();
+  } else {
+    for (let v = wl.y0 + 7; v < wl.y1 - 2; v += 8) {
+      const p = proj(wl.x1, v, 0);
+      c.beginPath(); c.moveTo(p.x, p.y - zh * (0.2 + rng() * 0.15)); c.lineTo(p.x, p.y - zh * (0.75 + rng() * 0.2)); c.stroke();
+    }
+    const m0 = proj(wl.x1, wl.y0, 0), m1 = proj(wl.x1, wl.y1, 0);
+    c.beginPath(); c.moveTo(m0.x, m0.y - zh * 0.5); c.lineTo(m1.x, m1.y - zh * 0.5); c.stroke();
+  }
+  c.fillStyle = 'rgba(92,112,62,0.30)';
+  for (let k = 0; k < (Lx + Ly) / 24; k++) {
+    const u = wl.x0 + rng() * Lx, v = wl.y1 - rng() * 2;
+    const p = proj(Lx >= Ly ? u : wl.x1, Lx >= Ly ? wl.y1 : wl.y0 + rng() * Ly, 0);
+    c.beginPath(); c.ellipse(p.x, p.y - zh * 0.18, 2.4 * Z, 1.2 * Z, 0, 0, 7); c.fill();
+  }
+  c.lineWidth = 1;
+}
+
+function milDrawFence(c, f) {
+  const Z = MIL_ZOOM;
+  const dx = f.x1 - f.x0, dy = f.y1 - f.y0, L = Math.hypot(dx, dy) || 1, n = Math.max(1, Math.round(L / 26));
+  c.strokeStyle = 'rgba(34,30,26,0.6)'; c.lineWidth = 0.7 * Z;             // wire runs
+  for (const zz of [7.2, 4.8, 2.2]) {
+    const p0 = proj(f.x0, f.y0, zz), p1 = proj(f.x1, f.y1, zz);
+    c.beginPath(); c.moveTo(p0.x, p0.y); c.lineTo(p1.x, p1.y); c.stroke();
+  }
+  for (let i = 0; i <= n; i++) {
+    const x = f.x0 + dx * i / n, y = f.y0 + dy * i / n;
+    const b = proj(x, y, 0), t = proj(x, y, 8);
+    c.strokeStyle = '#4c4030'; c.lineWidth = 1.4 * Z;
+    c.beginPath(); c.moveTo(b.x, b.y); c.lineTo(t.x, t.y); c.stroke();
+    c.fillStyle = 'rgba(255,244,220,0.3)'; c.fillRect(t.x - 0.6 * Z, t.y, 1.2 * Z, 1.2 * Z);
+  }
+  c.lineWidth = 1;
+}
+
+function milDrawProp(c, pr) {
+  const Z = MIL_ZOOM, rng = mulberry32(pr.seed | 0), x = pr.x, y = pr.y;
+  switch (pr.kind) {
+    case 'crates': {   // a little cargo depot: two on the ground, one stacked askew
+      milPrism(c, x - 7, y - 6, x + 1, y + 2, 7, '#8a7048', '#6e5838', '#4e3e26');
+      milPrism(c, x + 1.5, y - 5, x + 8.5, y + 2, 6, '#93794e', '#75603c', '#52422a');
+      milPrism(c, x - 3.5, y - 4.5, x + 3.5, y + 2.5, 6.4, '#9b8158', '#7a6544', '#57472e', 1, 7);
+      const t = proj(x, y - 1, 13.4);
+      c.fillStyle = 'rgba(40,30,18,0.5)'; c.fillRect(t.x - 4.4 * Z, t.y - 0.5 * Z, 8.8 * Z, Z); // strap
+      break;
+    }
+    case 'barrels': {
+      for (const [ox, oy] of [[-3.4, -1.6], [3.2, -2.2], [0.2, 2.6]]) {
+        const bx = x + ox, by = y + oy, b = proj(bx, by, 0), t = proj(bx, by, 8);
+        const col = rng() < 0.4 ? '#7a3a30' : rng() < 0.7 ? '#4e5c46' : '#5c5a52';
+        c.fillStyle = milMix(col, '#20242a', 0.35);
+        c.beginPath(); c.moveTo(b.x - 3.4 * Z, b.y); c.lineTo(b.x - 3.4 * Z, t.y); c.lineTo(b.x + 3.4 * Z, t.y); c.lineTo(b.x + 3.4 * Z, b.y); c.closePath(); c.fill();
+        c.fillStyle = milMix(col, '#f4e8c8', 0.10);
+        c.fillRect(b.x - 3.4 * Z, t.y, 2.2 * Z, b.y - t.y);
+        c.fillStyle = 'rgba(30,26,20,0.5)'; c.fillRect(b.x - 3.4 * Z, t.y + (b.y - t.y) * 0.35, 6.8 * Z, 0.8 * Z);
+        c.fillStyle = milMix(col, '#fff4d8', 0.3);
+        c.beginPath(); c.ellipse(t.x, t.y, 3.4 * Z, 1.9 * Z, 0, 0, 7); c.fill();
+        c.fillStyle = 'rgba(40,34,26,0.4)';
+        c.beginPath(); c.ellipse(t.x, t.y, 2.2 * Z, 1.1 * Z, 0, 0, 7); c.fill();
+      }
+      break;
+    }
+    case 'container': {
+      const col = ['#5f4a38', '#44503c', '#54424a', '#3e4a52'][(pr.seed >>> 3) % 4];
+      milPrism(c, x - 15, y - 7, x + 15, y + 7, 13, milMix(col, '#f4e6c4', 0.2), milMix(col, '#fff', 0.06), milMix(col, '#141820', 0.35));
+      const p0 = proj(x - 13, y + 7, 0), p1 = proj(x + 13, y + 7, 0), zt = 12 * MIL_ZK * Z;
+      c.strokeStyle = 'rgba(20,18,14,0.35)'; c.lineWidth = 0.7 * Z;        // corrugation
+      for (let k = 1; k < 9; k++) {
+        const fx2 = p0.x + (p1.x - p0.x) * k / 9, fy2 = p0.y + (p1.y - p0.y) * k / 9;
+        c.beginPath(); c.moveTo(fx2, fy2 - zt * 0.08); c.lineTo(fx2, fy2 - zt * 0.92); c.stroke();
+      }
+      c.lineWidth = 1;
+      break;
+    }
+    case 'barrier': {
+      milPrism(c, x - 10, y - 2.6, x + 10, y + 2.6, 5, '#9a948a', '#7c766c', '#5a554c');
+      const t = proj(x, y - 2.6, 5 * 1);
+      c.fillStyle = 'rgba(180,140,30,0.6)';
+      const b0 = proj(x - 8, y + 2.6, 0), b1 = proj(x + 8, y + 2.6, 0), zb = 5 * MIL_ZK * Z;
+      for (let k = 0; k < 4; k++) {
+        const fx2 = b0.x + (b1.x - b0.x) * (k * 0.25 + 0.05), fy2 = b0.y + (b1.y - b0.y) * (k * 0.25 + 0.05);
+        c.beginPath(); c.moveTo(fx2, fy2 - zb * 0.15); c.lineTo(fx2 + 2.4 * Z, fy2 - zb * 0.85); c.lineTo(fx2 + 4 * Z, fy2 - zb * 0.85); c.lineTo(fx2 + 1.6 * Z, fy2 - zb * 0.15); c.closePath(); c.fill();
+      }
+      break;
+    }
+    case 'spool': {
+      const b = proj(x, y, 0), t = proj(x, y, 7);
+      c.fillStyle = '#6e5a40';
+      c.beginPath(); c.ellipse(b.x, b.y, 4.6 * Z, 2.6 * Z, 0, 0, 7); c.fill();
+      c.fillStyle = '#57452e'; c.fillRect(b.x - 4.6 * Z, t.y, 9.2 * Z, b.y - t.y);
+      c.fillStyle = '#83693f';
+      c.beginPath(); c.ellipse(t.x, t.y, 4.6 * Z, 2.6 * Z, 0, 0, 7); c.fill();
+      c.strokeStyle = 'rgba(40,30,18,0.5)'; c.lineWidth = 0.8 * Z;
+      c.beginPath(); c.ellipse(t.x, t.y, 3 * Z, 1.7 * Z, 0, 0, 7); c.stroke();
+      c.fillStyle = '#3e3222'; c.fillRect(t.x - 0.9 * Z, t.y - 0.9 * Z, 1.8 * Z, 1.8 * Z);
+      c.lineWidth = 1;
+      break;
+    }
+  }
 }
 
 function milCrate() {

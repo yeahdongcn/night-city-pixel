@@ -213,9 +213,10 @@ steps(900);
 
 // ---- stealth FOV: enemies only see inside their view cone ----
 G.mouse.down = false; G.keys.clear();
+G.state = 'play'; G.deadT = 0; G.p.hp = G.p.maxhp;   // the soak may have left V mid-death; the FOV stage needs a live V
 G.p.iframes = 99999;
 G.p.x = WORLD.spawn.x; G.p.y = WORLD.spawn.y;
-G.enemies = []; G.bounty = null; G.driving = false; G.car = null;
+G.enemies = []; G.bullets = []; G.bounty = null; G.driving = false; G.car = null;
 const watcher = makeEnemy(G.p.x + 90, G.p.y, 1, 'scavs', 'gun', {});
 watcher.wanderT = 9999; watcher.wx = 0; watcher.wy = 0; watcher.lookA = 0; // facing away from V
 G.enemies.push(watcher);
@@ -230,7 +231,7 @@ assert(watcher.alerted, 'enemy spots V inside its view cone');
 let solidCount = 0;
 for (let ty = 12; ty < 116; ty++) for (let tx = 12; tx < 116; tx++)
   if (WORLD.t[ty * WORLD.W + tx] === 2) solidCount++;
-assert(solidCount > 600, 'city blocks contain solid building tiles (got ' + solidCount + ')');
+assert(solidCount > 300, 'compound buildings + walls are solid tiles (got ' + solidCount + ')');
 {
   const dn0 = WORLD.dens[0];
   assert(WORLD.solidAt(dn0.tx0, dn0.ty0), 'building wall corner is solid');

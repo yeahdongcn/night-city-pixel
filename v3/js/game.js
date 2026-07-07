@@ -435,8 +435,8 @@ function boot() {
   } else if (/cones/.test(q)) { // screenshot helper: Kiroshi view cones on an unaware patrol
     startGame(false);
     G.cyber.kiroshi = 2;
-    spawnPack(G.p.x + 170, G.p.y - 120, 3, {});  // out of their sight range so they stay calm
-    for (let i = 0; i < 10; i++) step(1 / 60);
+    spawnPack(G.p.x + 105, G.p.y - 68, 3, {});   // on-screen at the tactical zoom, still calm
+    for (let i = 0; i < 8; i++) step(1 / 60);
     G.bannerO = null;
   } else if (/cargrid/.test(q)) { // screenshot helper: the car at 12 headings on one screen
     startGame(false); const m = q.match(/car=(\w+)/); G._cargrid = (m && CARD[m[1]]) ? m[1] : 'alvarado';
@@ -2369,8 +2369,7 @@ const CAR_SHAPE = {
   hyper:  { hl: 12.5, hw: 4.6, ch: 4.8, cf: -0.40, cr: -0.08, cab: 3.6, st: 1, wedge: 1 },
 };
 
-const MTN_PAL = { top: '#a08a64', lt: '#b89e70', dk: '#5c4c36' };   // sunlit badlands: E faces warm, S in shade
-const MTN_CAP = { top: '#c4b28a', lt: '#d0ba8e', dk: '#6a5940' };
+const MTN_PAL = { top: '#8a7c60', lt: '#97896c', dk: '#524634' };   // rocky ridge outcrops framing the map
 
 function drawCarGrid(c) {
   c.fillStyle = '#0a0c12'; c.fillRect(0, 0, VIEW_W, VIEW_H);
@@ -2446,9 +2445,23 @@ function render() {
   }
   for (let ty = minTY; ty <= maxTY; ty++) for (let tx = minTX; tx <= maxTX; tx++) {
     if (T[ty * W + tx] !== WT.BLDG || !milBorderTile(tx, ty)) continue;
-    if (milBorderKind(tx, ty) === 'mountain') D.push({ d: (tx + ty + 2) * TILE, k: 'mtn', tx, ty });
+    if (milBorderKind(tx, ty) === 'mountain') D.push({ d: (tx + ty + 2) * TILE, k: 'rock', tx, ty });
   }
+  for (const wl of WORLD.walls) {
+    const pW2 = proj(wl.x0, wl.y1, 0), pE2 = proj(wl.x1, wl.y0, 0), pN2 = proj(wl.x0, wl.y0, 0), pS2 = proj(wl.x1, wl.y1, 0);
+    if (pE2.x < -30 || pW2.x > VIEW_W + 30 || pS2.y < -30 || pN2.y - 40 > VIEW_H + 30) continue;
+    D.push({ d: wl.x1 + wl.y1, k: 'wall', o: wl });
+  }
+  for (const f of WORLD.fences) {                        // chunk long runs so the sort stays honest
+    const fdx = f.x1 - f.x0, fdy = f.y1 - f.y0, fL = Math.hypot(fdx, fdy) || 1, fn = Math.max(1, Math.ceil(fL / 48));
+    for (let i = 0; i < fn; i++) {
+      const sg = { x0: f.x0 + fdx * i / fn, y0: f.y0 + fdy * i / fn, x1: f.x0 + fdx * (i + 1) / fn, y1: f.y0 + fdy * (i + 1) / fn };
+      if (isoVisible((sg.x0 + sg.x1) / 2, (sg.y0 + sg.y1) / 2, 130)) D.push({ d: Math.max(sg.x0 + sg.y0, sg.x1 + sg.y1), k: 'fence', o: sg });
+    }
+  }
+  for (const tr of WORLD.trees) if (isoVisible(tr.x, tr.y, 170)) D.push({ d: tr.x + tr.y, k: 'tree', o: tr });
   const push = (x, y, k, o) => { if (isoVisible(x, y, 110)) D.push({ d: x + y, k, o }); };
+  for (const pr of WORLD.props) push(pr.x, pr.y, 'prop', pr);
   for (const L of WORLD.lights) push(L.x, L.y, 'lamp', L);
   for (const cr of G.crates) if (cr.hp > 0 && !crateHidden(cr)) push(cr.x, cr.y, 'crate', cr);
   for (const vn of WORLD.vends) push(vn.x, vn.y, 'vend', vn);
@@ -2552,14 +2565,18 @@ function drawMilThing(c, it, p) {
     milDrawBuilding(c, B, B._fa);
     return;
   }
-  if (it.k === 'mtn') {
-    const ht = milMtnHeight(it.tx, it.ty), x0 = it.tx * TILE, y0 = it.ty * TILE;
-    const a = milOccludes(x0, y0, x0 + TILE, y0 + TILE, ht) ? 0.3 : 1;
-    milPrism(c, x0, y0, x0 + TILE, y0 + TILE, ht, (ht > 96 ? MTN_CAP : MTN_PAL).top, MTN_PAL.lt, MTN_PAL.dk, a);
+  if (it.k === 'rock') {
+    const ht = milRockHeight(it.tx, it.ty), x0 = it.tx * TILE, y0 = it.ty * TILE;
+    const a = milOccludes(x0, y0, x0 + TILE, y0 + TILE, ht) ? 0.4 : 1;
+    milPrism(c, x0, y0, x0 + TILE, y0 + TILE, ht, MTN_PAL.top, MTN_PAL.lt, MTN_PAL.dk, a);
     return;
   }
+  if (it.k === 'wall') { milDrawWall(c, it.o); return; }
+  if (it.k === 'fence') { milDrawFence(c, it.o); return; }
+  if (it.k === 'tree') { milDrawTree(c, it.o); return; }
   const o = it.o, Z = MIL_ZOOM;
   switch (it.k) {
+    case 'prop': milDrawProp(c, o); break;
     case 'lamp': {                                                        // street lamp: pole + arm + head
       const b = proj(o.x, o.y, 0), t = proj(o.x, o.y, 26), hd = proj(o.x + 3.4, o.y + 3.4, 25);
       c.strokeStyle = '#2e3138'; c.lineWidth = 1.5 * Z;
