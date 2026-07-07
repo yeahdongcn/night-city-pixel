@@ -2347,7 +2347,7 @@ function milOccludes(x0, y0, x1, y1, zh) {
   for (let i = 0; i < G._occ.length; i++) {
     const a = G._occ[i];
     if (nearD <= a.d + 6) continue;                        // must be in front of the actor
-    const mx = a.big ? 16 : 8, hSpr = a.big ? 34 : 23;
+    const mx = (a.big ? 16 : 8) * MIL_ZOOM, hSpr = (a.big ? 34 : 23) * MIL_ZOOM;
     if (a.sx < pW.x - mx || a.sx > pE.x + mx) continue;
     const base = a.sx <= pS.x
       ? pW.y + (pS.y - pW.y) * ((a.sx - pW.x) / Math.max(1, pS.x - pW.x))   // along the south wall base
@@ -2369,8 +2369,8 @@ const CAR_SHAPE = {
   hyper:  { hl: 12.5, hw: 4.6, ch: 4.8, cf: -0.40, cr: -0.08, cab: 3.6, st: 1, wedge: 1 },
 };
 
-const MTN_PAL = { top: '#262118', lt: '#161310', dk: '#0c0a07' };
-const MTN_CAP = { top: '#3e382a', lt: '#161310', dk: '#0c0a07' };
+const MTN_PAL = { top: '#a08a64', lt: '#b89e70', dk: '#5c4c36' };   // sunlit badlands: E faces warm, S in shade
+const MTN_CAP = { top: '#c4b28a', lt: '#d0ba8e', dk: '#6a5940' };
 
 function drawCarGrid(c) {
   c.fillStyle = '#0a0c12'; c.fillRect(0, 0, VIEW_W, VIEW_H);
@@ -2411,6 +2411,7 @@ function render() {
   c.save();
   c.translate(G._ox + G._shx, G._oy + G._shy);
   c.rotate(Math.PI / 4);
+  c.scale(MIL_ZOOM, MIL_ZOOM);                            // Commandos camera: plan coords zoom up
   c.imageSmoothingEnabled = true;
   const bx0 = clamp(wx0 - 24 | 0, 0, WORLD.W * TILE), by0 = clamp(wy0 - 24 | 0, 0, WORLD.H * TILE);
   const bx1 = clamp(wx1 + 24 | 0, 0, WORLD.W * TILE), by1 = clamp(wy1 + 24 | 0, 0, WORLD.H * TILE);
@@ -2420,8 +2421,8 @@ function render() {
     if (!milBorderTile(tx, ty) || milBorderKind(tx, ty) !== 'water') continue;
     const sh = Math.sin(G.rt * 1.3 + tx * 0.8 + ty * 0.45);
     if (sh > 0.45) {
-      c.fillStyle = 'rgba(140,200,230,' + (0.04 + 0.10 * (sh - 0.45)).toFixed(3) + ')';
-      c.fillRect(tx * TILE + (tx * 7 % 9), ty * TILE + (ty * 5 % 11), 5 + (tx % 3) * 2, 1.4);
+      c.fillStyle = 'rgba(240,252,255,' + (0.08 + 0.2 * (sh - 0.45)).toFixed(3) + ')';   // sun glitter
+      c.fillRect(tx * TILE + (tx * 7 % 9), ty * TILE + (ty * 5 % 11), 5 + (tx % 3) * 2, 1.2);
     }
   }
   // puddle shimmer
@@ -2447,7 +2448,8 @@ function render() {
     if (T[ty * W + tx] !== WT.BLDG || !milBorderTile(tx, ty)) continue;
     if (milBorderKind(tx, ty) === 'mountain') D.push({ d: (tx + ty + 2) * TILE, k: 'mtn', tx, ty });
   }
-  const push = (x, y, k, o) => { if (isoVisible(x, y, 90)) D.push({ d: x + y, k, o }); };
+  const push = (x, y, k, o) => { if (isoVisible(x, y, 110)) D.push({ d: x + y, k, o }); };
+  for (const L of WORLD.lights) push(L.x, L.y, 'lamp', L);
   for (const cr of G.crates) if (cr.hp > 0 && !crateHidden(cr)) push(cr.x, cr.y, 'crate', cr);
   for (const vn of WORLD.vends) push(vn.x, vn.y, 'vend', vn);
   for (const dp of WORLD.displays) push(dp.x, dp.y, 'disp', dp);
@@ -2473,73 +2475,46 @@ function render() {
   for (const h of WORLD.holos) drawMilHolo(c, h);
 
   // slashes / bullets / particles (plan circle → screen circle, angles shift 45°)
+  const Z = MIL_ZOOM;
   for (const s of G.slashes) {
     const o = proj(s.x, s.y, 3);
-    c.strokeStyle = s.col; c.globalAlpha = s.t / 0.16; c.lineWidth = 2;
-    c.beginPath(); c.arc(o.x, o.y, s.range, s.a - 0.9 + Math.PI / 4, s.a + 0.9 + Math.PI / 4); c.stroke();
+    c.strokeStyle = s.col; c.globalAlpha = s.t / 0.16; c.lineWidth = 2 * Z;
+    c.beginPath(); c.arc(o.x, o.y, s.range * Z, s.a - 0.9 + Math.PI / 4, s.a + 0.9 + Math.PI / 4); c.stroke();
     c.globalAlpha = 1; c.lineWidth = 1;
   }
   for (const b of G.bullets) {
     const o = proj(b.x, b.y, 6), o2 = proj(b.x - b.vx * 0.02, b.y - b.vy * 0.02, 6);
-    c.strokeStyle = b.col; c.lineWidth = b.from === 'p' ? 1.5 : 1;
+    c.strokeStyle = b.col; c.lineWidth = (b.from === 'p' ? 1.3 : 0.9) * Z;
     c.beginPath(); c.moveTo(o2.x, o2.y); c.lineTo(o.x, o.y); c.stroke();
   }
   c.lineWidth = 1;
-  for (const pa of G.parts) { const o = proj(pa.x, pa.y, 2); c.fillStyle = pa.col; c.fillRect(o.x | 0, o.y | 0, pa.sz || 1, pa.sz || 1); }
+  for (const pa of G.parts) { const o = proj(pa.x, pa.y, 2); c.fillStyle = pa.col; const psz = (pa.sz || 1) * Z * 0.8; c.fillRect(o.x, o.y, psz, psz); }
 
-  // ---- additive glow pass ----
+  // ---- additive glow pass (daylight: neon reads faint, gameplay glows stay) ----
   c.globalCompositeOperation = 'lighter';
-  for (const g of G.glows) { const o = proj(g.x, g.y, 3); c.globalAlpha = Math.min(1, g.t * 8); c.drawImage(SPR.glowS(g.col, Math.round(g.r)), o.x - g.r, o.y - g.r); }
+  for (const g of G.glows) { const o = proj(g.x, g.y, 3), gr = g.r * Z * 0.8; c.globalAlpha = Math.min(1, g.t * 8); c.drawImage(SPR.glowS(g.col, Math.round(g.r)), o.x - gr, o.y - gr, gr * 2, gr * 2); }
   for (const sg of WORLD.signs) {
     if (!isoVisible(sg.x, sg.y, 70)) continue;
-    const o = proj(sg.x, sg.y, (sg._mh || 26) + 8), gr = sg.big ? 26 : 18;
-    c.globalAlpha = (sg.big ? 0.22 : 0.15) + 0.05 * Math.sin(G.rt * 3 + sg.x);
-    c.drawImage(SPR.glowS(sg.col, gr), o.x - gr, o.y - gr);
+    const o = proj(sg.x, sg.y, (sg._mh || 26) + 8), gr = (sg.big ? 26 : 18) * Z * 0.7;
+    c.globalAlpha = (sg.big ? 0.10 : 0.07) + 0.02 * Math.sin(G.rt * 3 + sg.x);
+    c.drawImage(SPR.glowS(sg.col, 20), o.x - gr, o.y - gr, gr * 2, gr * 2);
   }
-  for (const L of WORLD.lights) { if (!isoVisible(L.x, L.y, 30)) continue; const o = proj(L.x, L.y, 7); c.globalAlpha = 0.2; c.drawImage(SPR.glowS('#ffd9a0', 12), o.x - 12, o.y - 12); }
-  for (const vn of WORLD.vends) { if (!isoVisible(vn.x, vn.y)) continue; const o = proj(vn.x, vn.y, 9); c.globalAlpha = 0.26; c.drawImage(SPR.glowS('#05d9e8', 12), o.x - 12, o.y - 12); }
   for (const r of WORLD.roofs) { // interior mood lights, revealed with the room
     if (r.a > 0.6 || !r.lights.length) continue;
-    for (const L of r.lights) { const o = proj(L.x, L.y, 4); c.globalAlpha = 0.3 * (1 - r.a); c.drawImage(SPR.glowS(L.col, 18), o.x - 18, o.y - 18); }
+    for (const L of r.lights) { const o = proj(L.x, L.y, 4), gr = 18 * Z * 0.8; c.globalAlpha = 0.3 * (1 - r.a); c.drawImage(SPR.glowS(L.col, 18), o.x - gr, o.y - gr, gr * 2, gr * 2); }
   }
   for (const cr of G.crates) {
     if (cr.hp <= 0 || !isoVisible(cr.x, cr.y) || crateHidden(cr)) continue;
-    const o = proj(cr.x, cr.y, 6); c.globalAlpha = 0.12 + 0.07 * Math.sin(G.rt * 3 + cr.x);
-    c.drawImage(SPR.glowS('#f9f002', 9), o.x - 9, o.y - 9);
-  }
-  for (const B of MILG.bld) { // warm doorways
-    if (!B.b.ent || !B.b.doors) continue;
-    for (const dtx of B.b.doors) {
-      const wx = (dtx + 0.5) * TILE, wy = B.y1 + 3;
-      if (!isoVisible(wx, wy, 30)) continue;
-      const o = proj(wx, wy, 2); c.globalAlpha = 0.34 + 0.1 * Math.sin(G.rt * 3 + dtx);
-      c.drawImage(SPR.glowS('#ffb24a', 13), o.x - 13, o.y - 13);
-    }
+    const o = proj(cr.x, cr.y, 6), gr = 9 * Z * 0.8; c.globalAlpha = 0.10 + 0.06 * Math.sin(G.rt * 3 + cr.x);
+    c.drawImage(SPR.glowS('#f9f002', 9), o.x - gr, o.y - gr, gr * 2, gr * 2);
   }
   for (const pk of G.pickups) {
     if (!isoVisible(pk.x, pk.y)) continue;
-    const o = proj(pk.x, pk.y, 4); c.globalAlpha = 0.4 + 0.15 * Math.sin(G.rt * 5);
+    const o = proj(pk.x, pk.y, 4), gr = 10 * Z * 0.8; c.globalAlpha = 0.35 + 0.13 * Math.sin(G.rt * 5);
     const col = pk.kind === 'wpn' ? RAR_COL[WPN[pk.id].rar] : pk.kind === 'ed' ? '#f9f002' : '#2ecc71';
-    c.drawImage(SPR.glowS(col, 10), o.x - 10, o.y - 10);
+    c.drawImage(SPR.glowS(col, 10), o.x - gr, o.y - gr, gr * 2, gr * 2);
   }
-  for (const b of G.bullets) { const o = proj(b.x, b.y, 6); c.globalAlpha = 0.5; c.drawImage(SPR.glowS(b.col, 5), o.x - 5, o.y - 5); }
-  if (G.car && !G.car.dead && G.driving) {           // headlight beams sweeping the pavement (plan-space)
-    c.save(); c.translate(G._ox + G._shx, G._oy + G._shy); c.rotate(Math.PI / 4);
-    const a = G.car.a, hx = Math.cos(a), hy = Math.sin(a), sxu = -hy, syu = hx;
-    const S = CAR_SHAPE[CARD[G.car.id].shape] || CAR_SHAPE.sedan, DD = 54, sp = 11;
-    for (const s of [-1, 1]) {
-      const ox = G.car.x + hx * S.hl + sxu * (S.hw - 1.6) * s, oy = G.car.y + hy * S.hl + syu * (S.hw - 1.6) * s;
-      const ex = ox + hx * DD, ey = oy + hy * DD;
-      const g = c.createLinearGradient(ox, oy, ex, ey);
-      g.addColorStop(0, 'rgba(255,236,190,0.30)'); g.addColorStop(1, 'rgba(255,236,190,0)');
-      c.fillStyle = g;
-      c.beginPath(); c.moveTo(ox, oy); c.lineTo(ex + sxu * sp, ey + syu * sp); c.lineTo(ex - sxu * sp, ey - syu * sp); c.closePath(); c.fill();
-      c.globalAlpha = 0.12; c.fillStyle = '#ffecbe';
-      c.beginPath(); c.ellipse(ox + hx * DD * 0.55, oy + hy * DD * 0.55, DD * 0.3, sp * 0.9, a, 0, 7); c.fill();
-      c.globalAlpha = 1;
-    }
-    c.restore();
-  }
+  for (const b of G.bullets) { const o = proj(b.x, b.y, 6), gr = 5 * Z * 0.7; c.globalAlpha = 0.45; c.drawImage(SPR.glowS(b.col, 5), o.x - gr, o.y - gr, gr * 2, gr * 2); }
   c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
 
   for (const tx of G.texts) { const o = proj(tx.x, tx.y, 12); drawTextC(c, tx.text, o.x, o.y, tx.col, 1); }
@@ -2571,7 +2546,7 @@ function drawMilThing(c, it, p) {
   if (it.k === 'bld') {
     const B = it.B, zh = B.hgt * MIL_ZK;
     let t = B.roofIdx != null && WORLD.roofs[B.roofIdx] ? WORLD.roofs[B.roofIdx].a : 1;
-    if (t > 0.5 && milOccludes(B.x0, B.y0, B.x1, B.y1, zh)) t = 0.42;     // ghost when covering V/enemies
+    if (t > 0.5 && milOccludes(B.x0, B.y0, B.x1, B.y1, zh)) t = 0.55;     // ghost when covering V/enemies
     B._fa = B._fa == null ? t : B._fa + (t - B._fa) * 0.25;               // smooth, no popping
     if (B._fa < 0.04) return;
     milDrawBuilding(c, B, B._fa);
@@ -2583,95 +2558,119 @@ function drawMilThing(c, it, p) {
     milPrism(c, x0, y0, x0 + TILE, y0 + TILE, ht, (ht > 96 ? MTN_CAP : MTN_PAL).top, MTN_PAL.lt, MTN_PAL.dk, a);
     return;
   }
-  const o = it.o;
+  const o = it.o, Z = MIL_ZOOM;
   switch (it.k) {
+    case 'lamp': {                                                        // street lamp: pole + arm + head
+      const b = proj(o.x, o.y, 0), t = proj(o.x, o.y, 26), hd = proj(o.x + 3.4, o.y + 3.4, 25);
+      c.strokeStyle = '#2e3138'; c.lineWidth = 1.5 * Z;
+      c.beginPath(); c.moveTo(b.x, b.y); c.lineTo(t.x, t.y); c.stroke();
+      c.strokeStyle = 'rgba(255,255,255,0.18)'; c.lineWidth = 0.5 * Z;
+      c.beginPath(); c.moveTo(b.x - 0.5 * Z, b.y); c.lineTo(t.x - 0.5 * Z, t.y); c.stroke();
+      c.strokeStyle = '#2e3138'; c.lineWidth = 1.2 * Z;
+      c.beginPath(); c.moveTo(t.x, t.y); c.quadraticCurveTo(t.x + 2 * Z, t.y - 1 * Z, hd.x, hd.y); c.stroke();
+      c.fillStyle = '#41454e'; c.fillRect(hd.x - 1.6 * Z, hd.y - 0.8 * Z, 3.2 * Z, 1.6 * Z);
+      c.fillStyle = '#d8dce2'; c.fillRect(hd.x - 1.1 * Z, hd.y + 0.4 * Z, 2.2 * Z, 0.6 * Z);
+      c.lineWidth = 1;
+      break;
+    }
     case 'crate': {
-      milPrism(c, o.x - 5.5, o.y - 5.5, o.x + 5.5, o.y + 5.5, 8, '#584428', '#3c2e1a', '#281e10');
-      c.save(); c.translate(G._ox + (G._shx || 0), G._oy + (G._shy || 0) - 8 * MIL_ZK); c.rotate(Math.PI / 4);
+      milPrism(c, o.x - 5.5, o.y - 5.5, o.x + 5.5, o.y + 5.5, 8, '#8a7048', '#6a5432', '#4a3a20');
+      c.save(); c.translate(G._ox + (G._shx || 0), G._oy + (G._shy || 0) - 8 * MIL_ZK * Z); c.rotate(Math.PI / 4); c.scale(Z, Z);
       c.drawImage(MSPR.crate, o.x - 5.5, o.y - 5.5, 11, 11);
       c.restore();
       break;
     }
     case 'vend': {
-      milPrism(c, o.x - 5, o.y - 3.5, o.x + 5, o.y + 3.5, 14, '#3a4048', '#262b33', '#14181e');
+      milPrism(c, o.x - 5, o.y - 3.5, o.x + 5, o.y + 3.5, 14, '#8a8d94', '#5c6068', '#3a3e46');
       const pl = proj(o.x - 4, o.y + 3.5, 0), pr = proj(o.x + 4, o.y + 3.5, 0);
-      const g2 = c.createLinearGradient(0, pl.y - 12, 0, pl.y - 3);
-      g2.addColorStop(0, 'rgba(5,217,232,0.8)'); g2.addColorStop(1, 'rgba(4,90,120,0.5)');
+      const pt = 12.4 * Z, pb = 2.5 * Z;
+      const g2 = c.createLinearGradient(0, pl.y - pt, 0, pl.y - pb);
+      g2.addColorStop(0, 'rgba(8,180,205,0.9)'); g2.addColorStop(1, 'rgba(10,60,85,0.85)');
       c.fillStyle = g2;
-      c.beginPath(); c.moveTo(pl.x, pl.y - 12); c.lineTo(pr.x, pr.y - 12); c.lineTo(pr.x, pr.y - 3); c.lineTo(pl.x, pl.y - 3); c.closePath(); c.fill();
-      c.fillStyle = 'rgba(8,14,20,0.85)';
-      for (let row = 0; row < 2; row++) for (let k2 = 0; k2 < 3; k2++) {
-        const f = 0.18 + k2 * 0.3, px2 = pl.x + (pr.x - pl.x) * f, py2 = pl.y + (pr.y - pl.y) * f - 10 + row * 4;
-        c.fillRect(px2, py2, 1.6, 2);
+      c.beginPath(); c.moveTo(pl.x, pl.y - pt); c.lineTo(pr.x, pr.y - pt); c.lineTo(pr.x, pr.y - pb); c.lineTo(pl.x, pl.y - pb); c.closePath(); c.fill();
+      c.fillStyle = 'rgba(8,14,20,0.7)';
+      for (let row = 0; row < 4; row++) for (let k2 = 0; k2 < 5; k2++) {
+        const f = 0.12 + k2 * 0.18, px2 = pl.x + (pr.x - pl.x) * f, py2 = pl.y + (pr.y - pl.y) * f - 10.8 * Z + row * 2.1 * Z;
+        c.fillRect(px2, py2, 0.8 * Z, 1.1 * Z);
       }
       break;
     }
-    case 'disp': { const s = proj(o.x, o.y, 0); drawCarMil(c, s.x, s.y, -0.9, CARD[o.id], 1.12); break; }
+    case 'disp': { const s = proj(o.x, o.y, 0); drawCarMil(c, s.x, s.y, -0.9, CARD[o.id], 1.12 * Z); break; }
     case 'bush': milBill(c, milBush(o.kind), o.x, o.y, 1, 1, false, true, 20, 16); break;
     case 'pick': {
       if (milIndoorVis(o.x, o.y) < 0.4) break;                            // loot indoors waits for the roof to lift
       const s = proj(o.x, o.y, 0), bob = Math.sin(G.rt * 4 + o.x) * 1.2;
-      c.fillStyle = 'rgba(3,5,13,0.4)'; c.beginPath(); c.ellipse(s.x + 1, s.y, 4, 2, 0.5, 0, 7); c.fill();
+      c.save(); c.translate(s.x, s.y); c.scale(0.9 * Z, 0.9 * Z);         // world-scaled pickup markers
+      c.fillStyle = 'rgba(10,14,26,0.35)'; c.beginPath(); c.ellipse(1, 0.5, 4, 2, 0.5, 0, 7); c.fill();
       if (o.kind === 'wpn') {
         const w = WPN[o.id];
-        c.globalAlpha = 0.3; c.fillStyle = RAR_COL[w.rar]; c.fillRect(s.x - 1, s.y - 34, 2, 34); c.globalAlpha = 1;
-        c.drawImage(SPR.wicon(w.cls, KIND_COL[w.kind]), s.x - 8, s.y - 9 + bob, 16, 7);
+        c.globalAlpha = 0.3; c.fillStyle = RAR_COL[w.rar]; c.fillRect(-1, -34, 2, 34); c.globalAlpha = 1;
+        c.drawImage(SPR.wicon(w.cls, KIND_COL[w.kind]), -8, -9 + bob, 16, 7);
       } else if (o.kind === 'ed') {
-        c.fillStyle = '#b8860b'; c.beginPath(); c.ellipse(s.x, s.y - 4 + bob, 2.4, 3.4, 0, 0, 7); c.fill();
-        c.fillStyle = '#f9f002'; c.beginPath(); c.ellipse(s.x, s.y - 4 + bob, 1.2, 3, 0, 0, 7); c.fill();
+        c.fillStyle = '#b8860b'; c.beginPath(); c.ellipse(0, -4 + bob, 2.4, 3.4, 0, 0, 7); c.fill();
+        c.fillStyle = '#f9f002'; c.beginPath(); c.ellipse(0, -4 + bob, 1.2, 3, 0, 0, 7); c.fill();
       } else {
-        c.fillStyle = '#e8e8ee'; c.fillRect(s.x - 3, s.y - 8 + bob, 6, 6);
-        c.fillStyle = '#ff2a3c'; c.fillRect(s.x - 1, s.y - 7 + bob, 2, 4); c.fillRect(s.x - 2, s.y - 6 + bob, 4, 2);
+        c.fillStyle = '#e8e8ee'; c.fillRect(-3, -8 + bob, 6, 6);
+        c.fillStyle = '#ff2a3c'; c.fillRect(-1, -7 + bob, 2, 4); c.fillRect(-2, -6 + bob, 4, 2);
       }
+      c.restore();
       break;
     }
     case 'enemy': {
       const e = o, s = proj(e.x, e.y, 0);
       const iv = milIndoorVis(e.x, e.y); if (iv < 0.04) break;            // hidden under a solid roof
-      if (e.psycho) { c.globalAlpha = (0.5 + 0.3 * Math.sin(G.rt * 6)) * iv; c.drawImage(SPR.glowS('#bd00ff', 18), s.x - 18, s.y - 24); c.globalAlpha = 1; }
-      const ax = e.psycho ? MSPR.psycho : milPed(e.fac), fc = ax[e.face === 'side' ? 'side' : e.face][Math.floor(e.anim) % 2];
-      milBill(c, fc, e.x, e.y, (e.hitT > 0 ? 0.55 : 1) * iv, e.psycho ? 1.8 : 1, e.face === 'side' && e.flip);
+      const esc = e.psycho ? 1.8 : 1, eh = 20 * esc * Z;                  // sprite height on screen
+      if (e.psycho) { c.globalAlpha = (0.5 + 0.3 * Math.sin(G.rt * 6)) * iv; const gr = 18 * Z; c.drawImage(SPR.glowS('#bd00ff', 18), s.x - gr, s.y - gr - 6, gr * 2, gr * 2); c.globalAlpha = 1; }
+      const ax = e.psycho ? MSPR.psycho : milPed(e.fac), fc = ax[e.face === 'side' ? 'side' : e.face][milPh(e.anim)];
+      milBill(c, fc, e.x, e.y, (e.hitT > 0 ? 0.55 : 1) * iv, esc, e.face === 'side' && e.flip);
       if (iv < 0.5) break;                                                // faint silhouette only — no bars/labels yet
+      if (e.kind !== 'melee' && !e.psycho) {                              // their iron, visible at this zoom
+        const t2 = proj(e.x + Math.cos(e.lookA || 0), e.y + Math.sin(e.lookA || 0), 0), ang = Math.atan2(t2.y - s.y, t2.x - s.x);
+        c.save(); c.translate(s.x, s.y - 8 * Z); c.rotate(ang); c.scale(Z * 0.9, Z * 0.9);
+        c.fillStyle = '#1c1e26'; c.fillRect(2, -0.5, 8, 2);
+        c.fillStyle = 'rgba(255,255,255,0.2)'; c.fillRect(2, -0.5, 8, 0.7);
+        c.restore();
+      }
       if (e.aiming && e.aimT > 0 && e.kind !== 'melee') {                 // red aim laser
         const t0 = proj(e.x, e.y, 8);
         const tx2 = G.driving && G.car ? G.car.x : p.x, ty2 = G.driving && G.car ? G.car.y : p.y;
         const t1 = proj(tx2, ty2, 5);
-        c.strokeStyle = 'rgba(255,42,60,0.35)'; c.beginPath(); c.moveTo(t0.x, t0.y); c.lineTo(t1.x, t1.y); c.stroke();
+        c.strokeStyle = 'rgba(255,42,60,0.35)'; c.lineWidth = Z * 0.6; c.beginPath(); c.moveTo(t0.x, t0.y); c.lineTo(t1.x, t1.y); c.stroke(); c.lineWidth = 1;
       }
-      const yb = s.y - (e.psycho ? 38 : 24);
+      const yb = s.y - eh - 5, bw = 8 * Z;
       if ((G.cyber.kiroshi || e.bounty || e.psycho) && e.hp < e.maxhp) {
-        c.fillStyle = 'rgba(0,0,0,0.5)'; c.fillRect(s.x - 7, yb, 14, 2);
-        c.fillStyle = e.psycho ? '#bd00ff' : '#ff2a3c'; c.fillRect(s.x - 7, yb, 14 * e.hp / e.maxhp, 2);
+        c.fillStyle = 'rgba(0,0,0,0.5)'; c.fillRect(s.x - bw / 2, yb, bw, 2.4);
+        c.fillStyle = e.psycho ? '#bd00ff' : '#ff2a3c'; c.fillRect(s.x - bw / 2, yb, bw * e.hp / e.maxhp, 2.4);
       }
-      if (e.bounty && !e.psycho) { c.fillStyle = '#ff2a3c'; c.fillRect(s.x - 1, yb - 4, 2, 2); }
-      if (e.flashT > 0) drawTextC(c, '!', s.x, s.y - (e.psycho ? 46 : 32), '#ff2a3c', 1);
+      if (e.bounty && !e.psycho) { c.fillStyle = '#ff2a3c'; c.fillRect(s.x - 1.5, yb - 5, 3, 3); }
+      if (e.flashT > 0) drawTextC(c, '!', s.x, yb - 12, '#ff2a3c', 1.4);
       else if (!e.alerted && e.detect > 0.05) {
-        drawTextC(c, '?', s.x, s.y - 32, '#f9f002', 1);
-        c.fillStyle = 'rgba(0,0,0,0.5)'; c.fillRect(s.x - 5, s.y - 25, 10, 2);
-        c.fillStyle = e.detect > 0.6 ? '#ff9f1c' : '#f9f002'; c.fillRect(s.x - 5, s.y - 25, 10 * e.detect, 2);
+        drawTextC(c, '?', s.x, yb - 12, '#f9f002', 1.4);
+        c.fillStyle = 'rgba(0,0,0,0.5)'; c.fillRect(s.x - bw / 2, yb - 4, bw, 2);
+        c.fillStyle = e.detect > 0.6 ? '#ff9f1c' : '#f9f002'; c.fillRect(s.x - bw / 2, yb - 4, bw * e.detect, 2);
       }
       break;
     }
-    case 'civ': { const fc = milCiv(o.i)[o.face === 'side' ? 'side' : o.face][Math.floor(o.anim) % 2]; milBill(c, fc, o.x, o.y, milIndoorVis(o.x, o.y), 1, o.face === 'side' && o.flip); break; }
+    case 'civ': { const fc = milCiv(o.i)[o.face === 'side' ? 'side' : o.face][milPh(o.anim)]; milBill(c, fc, o.x, o.y, milIndoorVis(o.x, o.y), 1, o.face === 'side' && o.flip); break; }
     case 'npc': {
       const iv = milIndoorVis(o.x, o.y); if (iv < 0.04) break;
-      const fc = milCiv(o.i).down[0]; milBill(c, fc, o.x, o.y, iv, 1, false);
+      const fc = milCiv(o.i).down[1]; milBill(c, fc, o.x, o.y, iv, 1, false);
       if (iv < 0.6) break;
       const s = proj(o.x, o.y, 0);
-      drawTextC(c, o.name, s.x, s.y - 27, o.kind === 'joy' || o.kind === 'doll' ? '#ff2a6d' : '#5a6372', 1);
+      drawTextC(c, o.name, s.x, s.y - 20 * Z - 9, o.kind === 'joy' || o.kind === 'doll' ? '#ff2a6d' : '#6a7386', 1);
       break;
     }
-    case 'car': { const s = proj(o.x, o.y, 0); drawCarMil(c, s.x, s.y, o.a, CARD[o.id], 1.12); break; }
+    case 'car': { const s = proj(o.x, o.y, 0); drawCarMil(c, s.x, s.y, o.a, CARD[o.id], 1.12 * Z); break; }
     case 'player': {
       const ped = MSPR.player[G.gender] || MSPR.player.m;
-      for (const tr of p.trail) { const fc = ped[tr.face === 'side' ? 'side' : tr.face][0]; milBill(c, fc, tr.x, tr.y, tr.t * 1.2, 1, tr.face === 'side' && tr.flip, false); }
-      const fc = ped[p.face === 'side' ? 'side' : p.face][p.moving ? Math.floor(p.anim) % 2 : 0];
+      for (const tr of p.trail) { const fc = ped[tr.face === 'side' ? 'side' : tr.face][1]; milBill(c, fc, tr.x, tr.y, tr.t * 1.2, 1, tr.face === 'side' && tr.flip, false); }
+      const fc = ped[p.face === 'side' ? 'side' : p.face][p.moving ? milPh(p.anim) : 1];
       milBill(c, fc, p.x, p.y, p.camoT > 0 ? 0.25 : G.pHidden ? 0.8 : 1, 1, p.face === 'side' && p.flip);
       const w = curWpn();
       if (w && !MELEE_CLS[w.cls] && p.camoT <= 0) {
         const len = { pistol: 6, revolver: 7, smg: 8, rifle: 10, shotgun: 9, sniper: 12, lmg: 11, launcher: 8 }[w.cls] || 7;
         const s = proj(p.x, p.y, 0), t2 = proj(p.x + Math.cos(p.aim), p.y + Math.sin(p.aim), 0), ang = Math.atan2(t2.y - s.y, t2.x - s.x);
-        c.save(); c.translate(s.x, s.y - 8); c.rotate(ang);
+        c.save(); c.translate(s.x, s.y - 8 * Z); c.rotate(ang); c.scale(Z * 0.9, Z * 0.9);
         c.fillStyle = '#22242c'; c.fillRect(2, -0.5, len, 2.4);
         c.fillStyle = 'rgba(255,255,255,0.18)'; c.fillRect(2, -0.5, len, 0.8);
         c.fillStyle = KIND_COL[w.kind]; c.fillRect(2 + len - 2, 0, 2, 1);
@@ -2681,19 +2680,22 @@ function drawMilThing(c, it, p) {
     }
     case 'air': {
       const a = o, g = proj(a.x, a.y, 0), prog = 1 - Math.min(1, a.alt / 360);
-      c.fillStyle = 'rgba(3,5,13,' + (0.12 + 0.3 * prog).toFixed(2) + ')'; c.beginPath(); c.ellipse(g.x + 2, g.y, 5 + 7 * prog, (4 + 6 * prog) * 0.55, 0.5, 0, 7); c.fill();
+      c.fillStyle = 'rgba(10,14,26,' + (0.10 + 0.24 * prog).toFixed(2) + ')';
+      c.beginPath(); c.ellipse(g.x + 2 * Z, g.y, (5 + 7 * prog) * Z, (4 + 6 * prog) * 0.55 * Z, 0.5, 0, 7); c.fill();
       if (a.state === 'falling') {
         const cc = proj(a.x, a.y, a.alt);
-        c.fillStyle = '#ff6a00'; c.beginPath(); c.arc(cc.x, cc.y - 15, 10, Math.PI, 0); c.fill();
-        c.fillStyle = '#c24e00'; c.fillRect(cc.x - 10, cc.y - 15, 20, 2);
+        c.save(); c.translate(cc.x, cc.y); c.scale(Z, Z);
+        c.fillStyle = '#ff6a00'; c.beginPath(); c.arc(0, -15, 10, Math.PI, 0); c.fill();
+        c.fillStyle = '#c24e00'; c.fillRect(-10, -15, 20, 2);
         c.strokeStyle = 'rgba(220,220,230,0.6)'; c.beginPath();
-        c.moveTo(cc.x - 9, cc.y - 14); c.lineTo(cc.x - 4, cc.y - 3); c.moveTo(cc.x + 9, cc.y - 14); c.lineTo(cc.x + 4, cc.y - 3); c.stroke();
-        milPrism(c, a.x - 5, a.y - 4, a.x + 5, a.y + 4, 7, '#7a3c10', '#5a2c0c', '#3c1e08');
+        c.moveTo(-9, -14); c.lineTo(-4, -3); c.moveTo(9, -14); c.lineTo(4, -3); c.stroke();
+        c.restore();
+        milPrism(c, a.x - 5, a.y - 4, a.x + 5, a.y + 4, 7, '#a4581c', '#7a3c10', '#4c2608');
       } else {
-        milPrism(c, a.x - 6, a.y - 5, a.x + 6, a.y + 5, 9, '#7a3c10', '#5a2c0c', '#3c1e08');
+        milPrism(c, a.x - 6, a.y - 5, a.x + 6, a.y + 5, 9, '#a4581c', '#7a3c10', '#4c2608');
         const t = proj(a.x, a.y, 9);
-        c.fillStyle = '#ff6a00'; c.fillRect(t.x - 5, t.y - 1, 10, 2);
-        if ((G.frame / 12 | 0) % 2) { c.fillStyle = '#ffd27a'; c.fillRect(t.x - 1, t.y - 3, 2, 2); }
+        c.fillStyle = '#ff6a00'; c.fillRect(t.x - 5 * Z, t.y - 1 * Z, 10 * Z, 2 * Z);
+        if ((G.frame / 12 | 0) % 2) { c.fillStyle = '#ffd27a'; c.fillRect(t.x - Z, t.y - 3 * Z, 2 * Z, 2 * Z); }
       }
       break;
     }
@@ -2704,23 +2706,24 @@ function drawMilSign(c, sg) {
   if (!isoVisible(sg.x, sg.y, 70)) return;
   const rfA = sg.roof != null && WORLD.roofs[sg.roof] ? WORLD.roofs[sg.roof].a : 1;
   if (rfA < 0.04) return;
-  const o2 = proj(sg.x, sg.y, (sg._mh || 26) + 8), flick = Math.random() < 0.02 ? 0.4 : 1;
-  const w2 = textW(sg.text) * (sg.big ? 2 : 1);
-  c.globalAlpha = 0.72 * rfA;
-  c.fillStyle = 'rgba(7,9,14,0.8)'; c.fillRect(o2.x - w2 / 2 - 3, o2.y - 3, w2 + 6, (sg.big ? 10 : 5) + 8);
-  c.fillStyle = milRgba(sg.col, 0.5); c.fillRect(o2.x - w2 / 2 - 3, o2.y + (sg.big ? 10 : 5) + 4, w2 + 6, 1);
-  c.globalAlpha = (0.78 + 0.22 * Math.sin(G.rt * 3 + sg.x)) * flick * rfA;
-  drawTextC(c, sg.text, o2.x, o2.y, sg.col, sg.big ? 2 : 1);
+  const o2 = proj(sg.x, sg.y, (sg._mh || 26) + 6), flick = Math.random() < 0.02 ? 0.6 : 1;
+  const fs = sg.big ? 2.6 : 1.5, w2 = textW(sg.text, fs);
+  c.globalAlpha = 0.85 * rfA;
+  c.fillStyle = 'rgba(14,16,22,0.85)'; c.fillRect(o2.x - w2 / 2 - 5, o2.y - 4, w2 + 10, 5 * fs + 9);
+  c.fillStyle = 'rgba(255,255,255,0.10)'; c.fillRect(o2.x - w2 / 2 - 5, o2.y - 4, w2 + 10, 1.2);
+  c.fillStyle = milRgba(sg.col, 0.6); c.fillRect(o2.x - w2 / 2 - 5, o2.y + 5 * fs + 4, w2 + 10, 1.2);
+  c.globalAlpha = (0.85 + 0.15 * Math.sin(G.rt * 3 + sg.x)) * flick * rfA;
+  drawTextC(c, sg.text, o2.x, o2.y, sg.col, fs);
   c.globalAlpha = 1;
 }
 function drawMilHolo(c, h) {
   if (!isoVisible(h.x, h.y, 70)) return;
-  const bob = Math.sin(G.rt * 1.2 + h.x * 0.1) * 2, o2 = proj(h.x, h.y, 46 + bob), hw = Math.max(34, textW(h.text) + 10);
-  c.globalAlpha = 0.82 + 0.1 * Math.sin(G.rt * 7 + h.x);
-  c.fillStyle = 'rgba(8,12,20,0.85)'; c.fillRect(o2.x - hw / 2, o2.y - 7, hw, 13);
-  c.strokeStyle = h.col; c.strokeRect(o2.x - hw / 2 + 0.5, o2.y - 6.5, hw - 1, 12);
-  drawTextC(c, h.text, o2.x, o2.y - 3, h.col, 1);
-  c.globalAlpha = 0.2; c.fillStyle = h.col; c.fillRect(o2.x - 1, o2.y + 6, 2, 40 + bob); // holo emitter column
+  const bob = Math.sin(G.rt * 1.2 + h.x * 0.1) * 2, o2 = proj(h.x, h.y, 46 + bob), hw = Math.max(44, textW(h.text, 1.3) + 12);
+  c.globalAlpha = 0.75 + 0.1 * Math.sin(G.rt * 7 + h.x);
+  c.fillStyle = 'rgba(8,12,20,0.8)'; c.fillRect(o2.x - hw / 2, o2.y - 9, hw, 17);
+  c.strokeStyle = h.col; c.strokeRect(o2.x - hw / 2 + 0.5, o2.y - 8.5, hw - 1, 16);
+  drawTextC(c, h.text, o2.x, o2.y - 4, h.col, 1.3);
+  c.globalAlpha = 0.18; c.fillStyle = h.col; c.fillRect(o2.x - 1.5, o2.y + 8, 3, 46 * MIL_ZOOM * 0.6 + bob); // emitter column
   c.globalAlpha = 1;
 }
 
