@@ -1,44 +1,43 @@
-# NIGHT CITY — v3 (Commandos-style tactical edition, rebuilt)
+# NIGHT CITY: COMMANDOS (v3)
 
-**v3 is a REBUILD, not a reskin.** After two render-only attempts, this edition got a new
-"engine": a new world generator and all-new art, modeled directly on *Commandos: Behind
-Enemy Lines* screenshots. Only the **game logic** carries over — every system (39 weapons,
-iconics, 12 cars, 17 cyberware, bounties, cyberpsychos, shops, stealth FOV, weather,
-airdrops, the economy) and the **shared save** (`localStorage` key `ncpx2077_v1`, same
-format as v1/v2 — your records carry across editions on one origin).
+A from-scratch, Commandos-style stealth mission set in Night City's outskirts.
+**Zero code is shared with v1/v2** — new engine, new art, new UI, one hand-crafted
+map — the only link is the shared record: it **reads** `localStorage` key
+`ncpx2077_v1` (V's gender, street cred, arsenal, Kiroshi optics become mission
+perks) and on a successful extraction **writes back** eddies and kills with a
+read-modify-write that leaves the v1/v2 save schema untouched.
 
-## The world (new)
+## The mission — OPERATION DEAD MAIL
 
-No city grid. The map is Night City's outskirts, Commandos-style: three lazy roads curve
-across open dirt-and-grass country; ~14 walled or wire-fenced **compounds** hug the routes
-(the five shops among them — Afterlife, 2nd Amendment, Vik's Clinic, NC Autofixer, CLOUDS),
-each with a paved yard, gabled or shed-roofed buildings, gates, crate depots, barrels,
-containers, cable spools and barriers; gang dens hide in the warehouses; big billowy trees,
-hedgerows, crop fields, wrecks and lamp posts dress the country; a noisy coast walls the W/S
-and a rocky ridge the N/E. Same fixed seed → deterministic map; the save's position falls
-back to spawn if it predates the rebuild.
+Barghest runs stolen cargo through a walled freight depot on the old coast road.
+Crack the 3 cargo crates, then reach the SW extraction. A checkpoint with a boom
+barrier guards the road; patrols sweep the depot yard; the farmstead porch has eyes.
 
-## The look
+- **WASD** move · **SHIFT** sneak (quieter, harder to spot)
+- **Mouse** aim/shoot (loud — everyone within earshot comes running)
+- **E** silent takedown from behind · hold **E** to crack crates
+- **R** reload
+- Guard view cones are drawn on the ground, **clipped by real line-of-sight**
+  (walls and buildings cut them — classic Commandos). Suspicion turns them
+  amber, alert turns them red; two alerted guards raise the alarm and
+  reinforcements arrive. Kiroshi optics on your record reveal calm cones too.
 
-- **Camera**: military projection (45°-rotated plan, no foreshortening) at 2.25× — the
-  classic Commandos view, one compound fills the screen, ~45px characters.
-- **Terrain**: baked painterly plan — packed dirt with fine grain, ragged grass meadows,
-  aged-concrete yards, stroked roads with wheel ruts and potholes, furrowed fields, sea
-  with foam and sun glitter. No tile boundary is ever visible.
-- **Buildings**: low, pitched — terracotta/slate **gabled roofs** (tile courses, ridge caps,
-  chimneys, moss) with wall-pediment gable ends, or corrugated mono-pitch sheds; stucco and
-  stone facades with sky-glass windows, striped shop awnings, roll-up doors, drainpipes,
-  AC units and small gang tags. Enterable buildings still fade to their furnished interiors.
-- **Light**: soft overcast key from the NW, short SE shadows, heavy contact AO — the
-  richness lives in texture, not sun drama (exactly like the refs).
-- **Stealth**: view cones are big **solid Commandos green/orange sectors** on the ground.
-- Walls show masonry joints and weathered coping; wire fences are posts + sagging runs that
-  block movers but not bullets or sight — cover matters.
+## Tech (fresh, zero-dep)
 
-## Test / debug
+- `boot.js` — fullscreen dpr-aware canvas, loop, input, 45° military projection
+- `paint.js` — the whole look: painterly terrain baked once in plan space
+  (grass drifts, dirt aprons, rutted roads, furrowed fields, soft SE shadows),
+  buildings baked as complete sprites (gabled tile/slate roofs, chimneys,
+  ivy, shuttered windows, striped awnings), lobed tree crowns, props
+  (crate depots, barrels, tank traps, wagon, spool, boom barrier), 3×-baked
+  46px actors with 4-phase walk
+- `map.js` — one hand-composed map + rect/segment collision, LOS, cone raycasts
+- `sim.js` — patrols, suspicion→alert→alarm, combat, takedowns, loot, extraction
+- `ui.js` — dossier briefing / operative HUD / debrief + the record bridge
+
+## Test
 
 ```bash
-node test/smoke.js   # the full-systems gate, green against the rebuilt map
+node test/smoke.js   # headless: record perks, vision, takedown, loot, extraction, write-back, death
 ```
-`?autostart` spawn yard · `?cones` suspicious patrol · `?carspin` parked ride ·
-`?doorstep` interior reveal · `?cargrid` cars at 12 headings · `?wx=clear` force weather.
+Debug: `?play` skips the briefing · `?play&at=gate|checkpoint|farm|depot|insert`.
