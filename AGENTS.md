@@ -1,5 +1,15 @@
 # AGENTS.md — for AI coding agents (and fast-moving humans)
 
+> **Working under `v3/` (branch `v3`)?** Different world: `v3/` is NIGHT CITY: COMMANDOS,
+> a from-scratch three.js (r160, vendored) ES-module game — real 3D, ortho tactical camera.
+> Its gate is `cd v3 && node test/smoke.js` (pure sim modules, no DOM); serve with
+> `v3/run.sh` (:35464); headless WebGL screenshots via `node v3/test/shot.js <url> <out.png>`.
+> The ONLY contract shared with v1/v2 is the `ncpx2077_v1` record: v3 reads it for perks and
+> banks eddies + stats.kills back via read-modify-write — never touch other fields, never
+> change its schema. See `v3/README.md` + `v3/PLAN.md`. Deploys to the live site happen
+> ONLY from the separate `~/ws/yeahdongcn.github.io` clone (this repo's origin pushes to
+> night-city-pixel alone). Everything below this note describes the v1 engine at repo root.
+
 This repo was built agent-first and welcomes agentic PRs. Everything an agent needs to
 work here safely is on this page.
 

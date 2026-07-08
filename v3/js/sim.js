@@ -1,12 +1,20 @@
-'use strict';
-// ============ sim.js — the stealth game: patrols, cones, alarm, iron ============
+// sim.js — the stealth game: patrols, vision, alarm, iron. PURE plan-space
+// logic (no THREE, no DOM) — ported from the proven previous build; the node
+// smoke test drives a whole mission through this module.
+import { G } from './state.js';
+import { MAPD, slideMove, losClear, shotClear } from './map.js';
+import { clamp, lerp, dist, angTo, angDiff } from './util.js';
 
-const WALK = 132, SNEAK = 62, GRAD = 13, PRAD = 11;
+export const WALK = 132, SNEAK = 62, GRAD = 13, PRAD = 11;
+
+// renderer-side effects the sim triggers (left null headless)
+export const hooks = { bloodStain: null };
 
 // tiny synth cues (zero-dep)
 const SND = { ctx: null };
-function beep(f0, f1, dur, type, vol) {
+export function beep(f0, f1, dur, type, vol) {
   try {
+    if (typeof window === 'undefined') return;
     if (!SND.ctx) SND.ctx = new (window.AudioContext || window.webkitAudioContext)();
     const a = SND.ctx, o = a.createOscillator(), g = a.createGain(), t = a.currentTime;
     o.type = type || 'square'; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(30, f1), t + dur);
@@ -15,18 +23,18 @@ function beep(f0, f1, dur, type, vol) {
   } catch (e) {}
 }
 
-function resetMission() {
+export function resetMission() {
   const rec = G.rec;
   G.p = {
     x: MAPD.pstart.x, y: MAPD.pstart.y,
     hp: 100 + (rec ? Math.min(60, rec.lvl * 2) : 0), maxhp: 100 + (rec ? Math.min(60, rec.lvl * 2) : 0),
-    aim: -1.2, face: 'up', flip: false, anim: 0, moving: false, sneak: false,
+    aim: -1.2, anim: 0, moving: false, sneak: false,
     ammo: 12, clip: 12, reload: 0, cd: 0, gun: (rec && rec.weapons > 14) ? 'rifle' : 'pistol',
     dmg: 30 + (rec ? Math.min(24, rec.weapons) : 0),
   };
   G.guards = MAPD.patrols.map((pt, i) => ({
     id: i, x: pt.pts[0].x, y: pt.pts[0].y, wp: 1 % pt.pts.length, pts: pt.pts, idleMax: pt.idle,
-    idle: Math.random() * pt.idle, dir: 0, face: 'down', flip: false, anim: 0, moving: false,
+    idle: Math.random() * pt.idle, dir: 0, anim: 0, moving: false,
     sus: 0, alert: false, lastX: 0, lastY: 0, lostT: 0, cd: 0, hp: 42, gun: pt.gun, vr: 300, dead: false, heavy: false,
   }));
   G.bullets = []; G.fx = []; G.texts = []; G.bodies = [];
@@ -34,14 +42,15 @@ function resetMission() {
   G.looted = 0; G.lootEddies = 0; G.kills = 0;
   G.alarm = 0; G.alarmed = false; G.reinforced = false;
   G.extractOpen = false; G.done = null; G.debriefSaved = false;
-  G.cam.x = px(G.p.x, G.p.y); G.cam.y = py(G.p.x, G.p.y, 0);
-  G.note = 'CRACK THE 3 CARGO CRATES IN THE DEPOT'; G.noteT = 6;
+  G.cam.x = G.p.x; G.cam.y = G.p.y;
+  note('CRACK THE 3 CARGO CRATES IN THE DEPOT', 6);
 }
 
-function note(s, t) { G.note = s; G.noteT = t || 4; }
+export function note(s, t) { G.note = s; G.noteT = t || 4; }
 function addText(x, y, s, col) { G.texts.push({ x, y, s, col, t: 1.2 }); }
+function bloodStain(x, y, big) { if (hooks.bloodStain) hooks.bloodStain(x, y, big); }
 
-function simStep(dt) {
+export function simStep(dt) {
   const p = G.p;
 
   // ---- player move (screen-relative WASD) ----
@@ -50,20 +59,17 @@ function simStep(dt) {
   p.sneak = G.keys.has('ShiftLeft') || G.keys.has('ShiftRight');
   const mlen = Math.hypot(sx, sy);
   p.moving = mlen > 0;
+  const R2 = Math.SQRT1_2;
   if (p.moving) {
     sx /= mlen; sy /= mlen;
     const dxp = (sx + sy) * R2, dyp = (sy - sx) * R2;             // screen dir → plan dir
     const sp = (p.sneak ? SNEAK : WALK) * dt;
     slideMove(p, dxp * sp, dyp * sp, PRAD);
     p.anim += dt * (p.sneak ? 0.8 : 1.4) * 4;
-    if (Math.abs(sy) >= Math.abs(sx)) { p.face = sy > 0 ? 'down' : 'up'; }
-    else { p.face = 'side'; p.flip = sx < 0; }
   }
 
-  // aim at the cursor
-  const mw = unscr(G.mouse.x, G.mouse.y);
-  p.aim = angTo(p.x, p.y, mw.x, mw.y);
-  G.mouse.wx = mw.x; G.mouse.wy = mw.y;
+  // aim at the cursor (main.js keeps mouse.wx/wy = plan ground point)
+  p.aim = angTo(p.x, p.y, G.mouse.wx, G.mouse.wy);
 
   // ---- fire ----
   p.cd -= dt;
@@ -125,7 +131,12 @@ function simStep(dt) {
       if (b.from === 'p') {
         for (const g of G.guards) {
           if (g.dead) continue;
-          if (dist(nx, ny, g.x, g.y) < GRAD + 3) { b.life = 0; g.hp -= p.dmg; G.fx.push({ kind: 'blood', x: g.x, y: g.y, t: 0.2 }); if (g.hp <= 0) killGuard(g, false); else { g.sus = 1; alertGuard(g); } break; }
+          if (dist(nx, ny, g.x, g.y) < GRAD + 3) {
+            b.life = 0; g.hp -= p.dmg;
+            G.fx.push({ kind: 'blood', x: g.x, y: g.y, t: 0.2 });
+            if (g.hp <= 0) killGuard(g, false); else { g.sus = 1; alertGuard(g); }
+            break;
+          }
         }
       } else if (!G.done && dist(nx, ny, p.x, p.y) < PRAD + 3) {
         b.life = 0; p.hp -= 9 + Math.random() * 5; G.shake = 5; G.fx.push({ kind: 'blood', x: p.x, y: p.y, t: 0.2 });
@@ -140,21 +151,23 @@ function simStep(dt) {
   for (const t of G.texts) t.t -= dt;
   G.texts = G.texts.filter(t => t.t > 0);
 
-  // camera follows
-  const tx = px(p.x, p.y), ty = py(p.x, p.y, 0);
-  G.cam.x = lerp(G.cam.x, tx, Math.min(1, 5 * dt));
-  G.cam.y = lerp(G.cam.y, ty, Math.min(1, 5 * dt));
+  // camera follows (plan coords; the renderer projects)
+  G.cam.x = lerp(G.cam.x, p.x, Math.min(1, 5 * dt));
+  G.cam.y = lerp(G.cam.y, p.y, Math.min(1, 5 * dt));
   if (G.shake > 0) { G.cam.x += (Math.random() - 0.5) * G.shake; G.cam.y += (Math.random() - 0.5) * G.shake; G.shake = Math.max(0, G.shake - dt * 26); }
   G.noteT -= dt;
 }
 
-function alertGuard(g) {
+export function alertGuard(g) {
   if (!g.alert) { beep(340, 620, 0.2, 'square', 0.08); }
   g.alert = true; g.lostT = 0; g.lastX = G.p.x; g.lastY = G.p.y;
   G.alarm = Math.min(1, G.alarm + 0.5);
-  if (!G.alarmed) { G.alarmed = G.guards.filter(x => !x.dead && x.alert).length >= 2 || G.alarm >= 1; if (G.alarmed) note('ALARM RAISED — REINFORCEMENTS INBOUND', 4); }
+  if (!G.alarmed) {
+    G.alarmed = G.guards.filter(x => !x.dead && x.alert).length >= 2 || G.alarm >= 1;
+    if (G.alarmed) note('ALARM RAISED — REINFORCEMENTS INBOUND', 4);
+  }
 }
-function killGuard(g, silent) {
+export function killGuard(g, silent) {
   g.dead = true; G.kills++;
   G.bodies.push({ x: g.x, y: g.y, a: Math.random() * 0.6 - 0.3 + Math.PI / 4, guard: true });
   bloodStain(g.x, g.y, !silent);
@@ -165,7 +178,7 @@ function spawnReinforcements() {
   for (const s of spots) {
     G.guards.push({
       id: 90 + G.guards.length, x: s.x, y: s.y, wp: 0, pts: [s], idleMax: 1, idle: 0,
-      dir: 0, face: 'down', flip: false, anim: 0, moving: false,
+      dir: 0, anim: 0, moving: false,
       sus: 1, alert: true, lastX: G.p.x, lastY: G.p.y, lostT: 0, cd: 1, hp: 60, gun: 'rifle', vr: 340, dead: false, heavy: true,
     });
   }
@@ -218,10 +231,6 @@ function guardStep(g, dt) {
       if (g.pts.length === 1) g.dir += Math.sin(G.t * 0.6 + g.id) * dt * 0.7;   // sentries sweep their gaze
     } else moveToward(g, wp.x, wp.y, 66 * dt);
   }
-  // facing from dir (screen space)
-  const sdx = Math.cos(g.dir) - Math.sin(g.dir), sdy = Math.cos(g.dir) + Math.sin(g.dir);
-  if (Math.abs(sdy) >= Math.abs(sdx)) g.face = sdy > 0 ? 'down' : 'up';
-  else { g.face = 'side'; g.flip = sdx < 0; }
   if (g.moving) g.anim += dt * 4;
 }
 function moveToward(g, x, y, step) {

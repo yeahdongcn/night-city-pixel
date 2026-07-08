@@ -1,20 +1,21 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <title>NIGHT CITY: COMMANDOS</title>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  html,body{margin:0;padding:0;height:100%;background:#151511;overflow:hidden}
-  canvas{display:block;width:100vw;height:100vh;cursor:crosshair}
+  html, body { margin:0; padding:0; height:100%; background:#0b0e09; overflow:hidden; }
+  #cv { display:block; width:100vw; height:100vh; cursor:crosshair; }
+  #hud { position:fixed; inset:0; pointer-events:none; overflow:hidden;
+         font-family:'Bahnschrift','DIN Alternate','Franklin Gothic Medium','Segoe UI',system-ui,sans-serif;
+         color:#e8e4d8; }
 </style>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
 </head>
 <body>
 <canvas id="cv"></canvas>
-<script src="js/boot.js?v=1"></script>
-<script src="js/paint.js?v=1"></script>
-<script src="js/map.js?v=1"></script>
-<script src="js/sim.js?v=1"></script>
-<script src="js/ui.js?v=1"></script>
+<div id="hud"></div>
+<script type="module" src="js/main.js?v=302"></script>
 </body>
 </html>
